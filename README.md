@@ -3,24 +3,28 @@
 Replacement control software for the **MOTU PCIe-424** card and its AudioWire
 interfaces, for macOS versions where MOTU's own apps no longer work.
 
-MOTU's last driver shipped in 2017. On Sequoia the original control apps are
-dead ends: `MOTU PCI Audio Setup` and `MOTU PCI SMPTE Setup` are 32-bit i386 and
-cannot launch at all, and `CueMix FX` (both 1.6 83634 and 1.6 88494) starts and
-exits 0 immediately. The card itself works perfectly — the kext loads, CoreAudio
-sees it, audio I/O is fine. Only the control surface is missing.
+MOTU's last driver shipped in 2017. The card itself works perfectly on Sequoia —
+the kext loads, CoreAudio sees it, audio I/O is fine. Only the control surface
+is missing.
+
+Both original apps draw their entire UI through **Carbon** (MOTU's in-house
+`AwesomeLib` toolkit), so neither survives on modern macOS. `MOTU PCI Audio
+Setup` 1.5 is i386 PowerPlant and cannot launch at all; `CueMix FX` starts and
+exits immediately. See `docs/ORIGINAL-UI.md`.
 
 The driver's CoreAudio HAL plugin still exposes MOTU's complete C++ control API.
 This project talks to it directly.
 
 ## Status
 
-Card access is **solved and verified on macOS Sequoia with SIP fully enabled**:
+Card access is **solved and verified on macOS Sequoia 15.7.4 with SIP fully
+enabled**. `src/common/motu_card.*` wraps the whole API; `motu-dump` exercises it:
 
 ```
-GetNumWires = 4
-  wire 0 HD192   wire 1 24I/O-2   wire 2 24I/O-3   wire 3 2408mk3
-GetNumInputs = 96 (36 active)     GetSMUXOptionCapable = 1
+GetNumWires = 4    HD192 / 24I/O-2 / 24I/O-3 / 2408mk3
+96 inputs (36 active), 96 outputs (36 active)
 GetCueMixAPI / GetSMPTEAPI / GetTalkbackAPI   all non-NULL
+14 clock sources enumerated, 6 sample rates (44.1k–192k)
 ```
 
 UI work has not started.
@@ -43,41 +47,62 @@ own internal notification thread, so a main-thread call can never match until
 you set `'rnlp'`. See `docs/HALPLUGIN-API.md` for the disassembly and the full
 131-method API map.
 
+This is why **SIP can stay fully enabled** — unlike the gitflic project, which
+asks you to disable it.
+
 ## Plan
 
 Faithful separate replicas of MOTU's originals, not a merged tool.
 
 | App | Framework | Status |
 |---|---|---|
-| CueMix FX | JUCE (`kcoul/JUCE`, CMake) | not started |
-| MOTU PCI Audio Setup | ObjC++ / AppKit | not started |
+| CueMix FX | JUCE | not started |
+| MOTU PCI Audio Setup | JUCE | not started |
 | MOTU PCI SMPTE Setup | — | shelved, unused |
 
-C++ only. JUCE for CueMix FX because the original is fully skinned with custom
-channel strips and meters; AppKit for PCI Audio Setup because the original is
-stock AppKit and should look native.
+C++ and JUCE for both. Neither original used a stock control, so there is no
+native look to preserve; both are custom-drawn skins over the same card API, and
+sharing one widget set, one build and one language is worth more than matching
+whichever toolkit MOTU happened to use in 2011.
+
+JUCE constraint: **never let `AudioDeviceManager` open a device.** These are
+control surfaces, not audio clients, and whichever thread reaches the CoreAudio
+HAL first wins the run-loop registration — if JUCE's audio thread gets there
+first the card pointer stays NULL forever.
 
 ## Layout
 
 ```
-docs/    HALPLUGIN-API.md — API map + how to reach it
-src/common/              shared card-access code
-src/cuemix-fx/           JUCE app
-src/pci-audio-setup/     ObjC++/AppKit app
+docs/    HALPLUGIN-API.md  API map + how to reach it
+         ORIGINAL-UI.md    what MOTU's apps are, and what to capture from Mojave
+src/common/               shared card access (motu_card.h/.mm) + motu-dump
+src/cuemix-fx/            JUCE app
+src/pci-audio-setup/      JUCE app
+third_party/JUCE          submodule, kcoul/JUCE
 tools/   build.sh, coreaudio-trace.c, vtdump.py, entitlements.plist
 ```
 
 ## Building
 
 ```sh
-tools/build.sh src/common/motu-card-access.mm MotuCardAccess --run
+git submodule update --init --recursive
+tools/build.sh MotuDump src/common/motu_card.mm src/common/motu_dump.mm --run
 ```
 
 Must be a real `.app` bundle running `NSApplication` and signed with
 `com.apple.security.device.audio-input` — a bare CLI never gets the card
 pointer. `tools/build.sh` handles bundling and ad-hoc signing.
 
+JUCE builds need CMake, which is **not currently installed** (`brew install cmake`).
+
 ## Requirements
 
 - MOTU `MOTUPCIAudio.kext` 1.6 73220 installed in `/Library/Extensions`
 - SIP can stay **enabled**; no boot-args or `csr-active-config` changes needed
+
+## Related work
+
+- `github.com/ruslan-kherson/PCI-424` / gitflic.ru — a Swift/AppKit
+  reimplementation of PCI Audio Setup by another author, tested only against a
+  24I/O, and requiring SIP to be partially disabled. Useful for cross-checking
+  API semantics.

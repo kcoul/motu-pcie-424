@@ -1,22 +1,38 @@
 #!/bin/zsh
 # Build, bundle, ad-hoc sign and optionally run a MOTU card tool.
-#   tools/build.sh src/common/motu-card-access.mm MotuCardAccess --run
+#
+#   tools/build.sh NAME src.mm [more.mm ...] [--run]
+#
+# A bundled .app is not optional: the HAL plugin hands out the card pointer only
+# to a real NSApplication, and only when the process is signed with the
+# audio-input entitlement. A bare CLI always gets NULL.
 set -e
-SRC="${1:-src/common/motu-card-access.mm}"
-NAME="${2:-MotuCardAccess}"
+
+NAME="$1"; shift || { print -u2 "usage: build.sh NAME src... [--run]"; exit 2 }
+RUN=0
+SRCS=()
+for a in "$@"; do
+  [[ "$a" == "--run" ]] && { RUN=1; continue }
+  SRCS+=("$a")
+done
+(( ${#SRCS} )) || { print -u2 "no sources given"; exit 2 }
+
 ROOT="${0:A:h:h}"
 cd "$ROOT"
 
-# Xcode.app's licence is unaccepted, which blocks clang/swiftc when
-# xcode-select points at it. Use the Command Line Tools toolchain instead.
+# Xcode.app's licence is unaccepted, which blocks clang when xcode-select points
+# at it. Use the Command Line Tools toolchain instead.
 export DEVELOPER_DIR=/Library/Developer/CommandLineTools
 CXX=/Library/Developer/CommandLineTools/usr/bin/clang++
 SDK=$(ls -d /Library/Developer/CommandLineTools/SDKs/MacOSX*.sdk | tail -1)
 
 APP="build/$NAME.app"
+rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-$CXX -isysroot "$SDK" -std=c++17 -ObjC++ -O2 \
-     -o "$APP/Contents/MacOS/$NAME" "$SRC" \
+
+$CXX -isysroot "$SDK" -std=c++17 -ObjC++ -O2 -Wall \
+     -Isrc/common \
+     -o "$APP/Contents/MacOS/$NAME" "${SRCS[@]}" \
      -framework Cocoa -framework CoreAudio -framework CoreFoundation
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -35,6 +51,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 codesign -f -s - --entitlements tools/entitlements.plist "$APP"
-echo "built $APP"
-[[ "$3" == "--run" ]] && { rm -f /tmp/motu-spike.txt; open -a "$ROOT/$APP"; sleep 8; cat /tmp/motu-spike.txt; }
-exit 0
+print "built $APP"
+
+if (( RUN )); then
+  rm -f /tmp/motu-dump.txt
+  open -W -a "$ROOT/$APP" 2>/dev/null || open -a "$ROOT/$APP"
+  for i in {1..40}; do [[ -s /tmp/motu-dump.txt ]] && break; sleep 0.5; done
+  sleep 1
+  cat /tmp/motu-dump.txt
+fi
