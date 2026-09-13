@@ -34,6 +34,7 @@ private:
     void paintStrip(juce::Graphics&, const StripInfo&, int x);
     void paintPanel(juce::Graphics&, int x);
     void paintScrollBar(juce::Graphics&);
+    void drawLitArc(juce::Graphics&, int cx, int cy, float fromDeg, float toDeg);
 
     int panelX() const { return getWidth() - kPanelWidth; }
     int stripsWidth() const { return panelX() - kStripsLeft; }
@@ -56,6 +57,10 @@ private:
 
     struct Drag { Hit hit; int startY = 0; int startValue = 0; int startCapTop = 0; };
     std::optional<Drag> drag_;
+
+    void beginRename(int strip, juce::Rectangle<int> well);
+    std::unique_ptr<juce::TextEditor> nameEditor_;
+    int renaming_ = -1;
 
     ConsoleModel& model_;
     ClassicSkin& skin_;

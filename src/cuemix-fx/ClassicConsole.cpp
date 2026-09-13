@@ -4,8 +4,10 @@
 
 namespace {
 const juce::Colour kLabel { 0xff3c3c3c };
-const juce::Colour kWellText { 0xffffffff };
-const juce::Colour kLcd { 0xff37b7ff };
+// Sampled from the reference screenshot: values and names in the navy wells,
+// and the LCD's cyan.
+const juce::Colour kWellText { 0xff96dff6 };
+const juce::Colour kLcd { 0xff00ccff };
 
 constexpr int kScrollY = 130;
 
@@ -45,6 +47,10 @@ int volumeFromCapTop(int top) {
     }
     return 0;
 }
+
+// A knob frame's pointer angle in degrees, 0 = straight up, clockwise positive:
+// frames 4..60 sweep -135..+135.
+float frameAngle(int frame) { return -135.0f + (frame - 4) * 270.0f / 56.0f; }
 
 // KnobRotation: 61 usable frames, 4 = fully left, 32 = centre, 60 = fully right.
 int panFrame(int raw)  { return 4 + juce::jlimit(0, 56, (int)std::lround(raw * 56.0 / 128.0)); }
@@ -118,7 +124,10 @@ void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info, int x)
     left(g, "MUTE", 11.0f, kLabel, x + 6, 13, 34);
 
     skin_.draw(g, "KnobWithStringWell", x, 24);
-    skin_.drawFrame(g, "KnobRotation", 26, 26, trimFrame(st.trim), x + 10, 35);
+    // Trim's LEDs fill from the bottom stop up to the knob.
+    const int tf = trimFrame(st.trim);
+    if (tf > 4) drawLitArc(g, x + 23, 48, -135.0f, frameAngle(tf));
+    skin_.drawFrame(g, "KnobRotation", 26, 26, tf, x + 10, 35);
     skin_.drawFrame(g, "TrimClipIndicator", 6, 6, 0, x + 44, 33);   // 3 frames: off, signal, clip
     left(g, "TRIM", 11.5f, kLabel, x + 53, 37, 30);
     centred(g, juce::String(st.trim - 64) + " dB", 12.0f, kWellText, x + 62, 54, 36);
@@ -137,6 +146,9 @@ void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info, int x)
 
     // Mix section.
     skin_.draw(g, "ChannelStripMixLegacy", x, 151);
+    // Pan's LEDs run from centre out to the knob (the three centre segments always lit).
+    const float pa = frameAngle(panFrame(st.pan));
+    drawLitArc(g, x + 23, 175, juce::jmin(0.0f, pa) - 16.0f, juce::jmax(0.0f, pa) + 16.0f);
     skin_.drawFrame(g, "KnobRotation", 26, 26, panFrame(st.pan), x + 10, 162);
     centred(g, "PAN", 11.5f, kLabel, x + 66, 163, 30);
     centred(g, panText(st.pan), 12.0f, kWellText, x + 62, 181, 36);
@@ -154,6 +166,17 @@ void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info, int x)
 
     skin_.drawFrame(g, "FaderCap", 22, 47, 0, x + 38, faderCapTop(st.volume));
     centred(g, volumeText(st.volume), 12.0f, kWellText, x + 55, 442, 44);
+}
+
+// KnobLit's blue ring (frame 0 of six colours), shown only between two angles.
+// The ring's centre is 17.5 x 17 inside each 36 x 32 frame.
+void ClassicConsole::drawLitArc(juce::Graphics& g, int cx, int cy, float fromDeg, float toDeg) {
+    juce::Path wedge;
+    wedge.addPieSegment((float)cx - 30.0f, (float)cy - 30.0f, 60.0f, 60.0f,
+                        juce::degreesToRadians(fromDeg), juce::degreesToRadians(toDeg), 0.0f);
+    juce::Graphics::ScopedSaveState s(g);
+    g.reduceClipRegion(wedge);
+    skin_.drawFrame(g, "KnobLit", 36, 32, 0, cx - 17, cy - 17);
 }
 
 void ClassicConsole::paintScrollBar(juce::Graphics& g) {
@@ -422,9 +445,59 @@ void ClassicConsole::mouseDrag(const juce::MouseEvent& e) {
 }
 
 void ClassicConsole::mouseDoubleClick(const juce::MouseEvent& e) {
-    // Double-click returns a knob or fader to its default.
+    // Double-click on a channel name renames it (a feature MOTU never had).
+    const auto p = e.getPosition();
+    if (p.x >= kStripsLeft && p.x < panelX() && p.y >= 100 && p.y < 128) {
+        const int i = (p.x - kStripsLeft + scroll_) / kStripPitch;
+        if (juce::isPositiveAndBelow(i, (int)model_.strips().size())) {
+            beginRename(i, { kStripsLeft + i * kStripPitch - scroll_, 100, 81, 28 });
+            return;
+        }
+    }
+    // Otherwise it returns a knob or fader to its default.
     const auto h = hitAt(e.getPosition());
     if (h.kind == Kind::Knob || h.kind == Kind::Fader) model_.setLocal(h.param, h.centre, h.strip);
+}
+
+void ClassicConsole::beginRename(int strip, juce::Rectangle<int> well) {
+    renaming_ = strip;
+    nameEditor_ = std::make_unique<juce::TextEditor>();
+    auto& ed = *nameEditor_;
+    ed.setFont(ClassicSkin::font(12.0f));
+    ed.setJustification(juce::Justification::centred);
+    ed.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff141a5c));
+    ed.setColour(juce::TextEditor::textColourId, kWellText);
+    ed.setColour(juce::TextEditor::highlightColourId, kLcd.withAlpha(0.35f));
+    ed.setColour(juce::TextEditor::highlightedTextColourId, juce::Colours::white);
+    ed.setColour(juce::TextEditor::outlineColourId, kLcd);
+    ed.setColour(juce::TextEditor::focusedOutlineColourId, kLcd);
+    ed.setColour(juce::CaretComponent::caretColourId, kWellText);
+    ed.setIndents(2, 7);
+    ed.setText(model_.strips()[(size_t)strip].customName, false);
+    ed.setTextToShowWhenEmpty(model_.strips()[(size_t)strip].channelName, kWellText.withAlpha(0.4f));
+    ed.setBounds(well.withTrimmedTop(12).withHeight(16).expanded(0, 1));
+    addAndMakeVisible(ed);
+    ed.grabKeyboardFocus();
+    ed.selectAll();
+
+    auto finish = [this](bool apply) {
+        if (!nameEditor_ || renaming_ < 0) return;
+        const auto text = nameEditor_->getText();
+        const int index = renaming_;
+        renaming_ = -1;
+        // Delete the editor after its callback has returned.
+        juce::MessageManager::callAsync([this, apply, text, index, safe = juce::Component::SafePointer<ClassicConsole>(this)] {
+            if (safe == nullptr) return;
+            nameEditor_.reset();
+            if (apply && juce::isPositiveAndBelow(index, (int)model_.strips().size())
+                && text.trim() != model_.strips()[(size_t)index].customName)
+                model_.renameStrip(index, text);
+            repaint();
+        });
+    };
+    ed.onReturnKey = [finish] { finish(true); };
+    ed.onEscapeKey = [finish] { finish(false); };
+    ed.onFocusLost = [finish] { finish(true); };
 }
 
 void ClassicConsole::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w) {

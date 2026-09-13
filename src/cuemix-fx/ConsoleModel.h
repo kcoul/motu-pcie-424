@@ -25,6 +25,7 @@ struct StripInfo {
     int id = 0;                            // card-wide input id
     juce::String interfaceName;            // "HD192"
     juce::String channelName;              // custom name, or "Analog-A 3"
+    juce::String customName;               // "" when the channel has no custom name
     StripState state;
 };
 
@@ -91,6 +92,11 @@ public:
     void clearLocalChanges();
     int scopeSource(int side) const;                     // strip index, 0 = Left
 
+    // Renaming *is* written to the card: it is the same driver call PCI Audio
+    // Setup's Edit Channel Names uses (verified safe), so both apps agree. An
+    // empty name restores the hardware name.
+    void renameStrip(int strip, const juce::String& name);
+
     std::function<void(bool layoutChanged)> onChange;
 
 private:
@@ -98,6 +104,8 @@ private:
     void refresh();
     bool syncLayout();
     bool poll();
+    bool refreshNames();
+    int ticks_ = 0;
 
     AudioDeviceID dev_ = 0;
     motu::Card card_;

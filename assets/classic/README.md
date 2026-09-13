@@ -12,6 +12,7 @@ Sheets are equal frames laid out row by row:
 
 | sprite | frame | notes |
 |---|---|---|
+| `KnobLit` | 36 × 32 | the LED ring, six colours (0 = blue); ring centre at 17.5, 17; drawn through a pie mask |
 | `KnobRotation` | 26 × 26 | frame 0 = bare base, 4 = full left, 32 = centre, 60 = full right |
 | `SmallKnobBlack` | 31 × 31 | same numbering |
 | `TextButtons` | 82 × 20 | col 0 off / 1 on / 2-3 hover / 4-5 disabled; row 0 has the grille |

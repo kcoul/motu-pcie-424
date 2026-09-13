@@ -24,6 +24,9 @@ State at the end of the 2026-09-12 session.
   talkback state.
 - **Menu bar identical to MOTU's.** Unbuilt items say in the LCD which stage
   delivers them.
+- **Rename a channel** by double-clicking its name in Classic. That writes the
+  same custom name PCI Audio Setup's editor does (new; MOTU never had it).
+  CueMix re-reads names every second.
 - **Every control is interactive** in both skins, as local values the LCD marks
   "not sent". *Revert to Card Values* drops them. `ConsoleModel::setLocal` is
   the future write path.
@@ -56,8 +59,6 @@ with faders, pan, mute and solo, once the encodings are known.
 
 ## Small known issues
 
-- CueMix only re-reads channel names when the set of active inputs changes, so
-  renames made while it is open show after a relaunch.
 - The Modern skin can open scrolled a few strips in.
 - The dim-knob range (0–255) and the "Sequencer using N faders" figure are
   guesses.

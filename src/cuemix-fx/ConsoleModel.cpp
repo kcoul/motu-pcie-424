@@ -60,7 +60,9 @@ void ConsoleModel::refresh() {
         if (onChange) onChange(false);
     }
     if (!card_) return;
-    const bool layout = syncLayout();
+    // Names can change from outside (PCI Audio Setup's editor): re-read each second.
+    const bool names = (++ticks_ % 10 == 0) && refreshNames();
+    const bool layout = syncLayout() || names;
     const bool values = poll();
     if ((layout || values) && onChange) onChange(layout);
 }
@@ -90,8 +92,9 @@ bool ConsoleModel::syncLayout() {
             s.id = id;
             const auto [iface, kind] = splitDescription(card_.inputDescription(e, id));
             s.interfaceName = iface;
-            s.channelName = card_.channelName(e, id, true);
-            if (s.channelName.isEmpty()) s.channelName = kind + " " + juce::String(card_.bankRelativeID(e, id) + 1);
+            s.customName = card_.channelName(e, id, true);
+            s.channelName = s.customName.isNotEmpty() ? s.customName
+                                                      : kind + " " + juce::String(card_.bankRelativeID(e, id) + 1);
             strips_.push_back(s);
         }
         changed = true;
@@ -121,6 +124,36 @@ bool perMix(P p) {
 }
 bool perInput(P p) { return p == P::Trim || p == P::InputMute || p == P::Stereo || perMix(p); }
 }  // namespace
+
+bool ConsoleModel::refreshNames() {
+    motu::Exception e;
+    bool changed = false;
+    for (auto& s : strips_) {
+        const juce::String custom = card_.channelName(e, s.id, true);
+        if (custom == s.customName) continue;
+        s.customName = custom;
+        if (custom.isNotEmpty()) s.channelName = custom;
+        else {
+            const juce::String desc = card_.inputDescription(e, s.id);
+            s.channelName = desc.fromFirstOccurrenceOf(":", false, false) + " " + juce::String(card_.bankRelativeID(e, s.id) + 1);
+        }
+        changed = true;
+    }
+    if (changed) talkback_ = {};   // recompute source names on the next poll
+    return changed;
+}
+
+void ConsoleModel::renameStrip(int strip, const juce::String& name) {
+    if (!card_ || !juce::isPositiveAndBelow(strip, (int)strips_.size())) return;
+    motu::Exception e;
+    card_.setChannelName(e, strips_[(size_t)strip].id, true, name.trim().toStdString());
+    if (!e.raised()) card_.commitChanges(e, true);
+    if (e.raised()) { showNotice("Rename failed", juce::String(e.str())); return; }
+    refreshNames();
+    poll();
+    if (onChange) onChange(true);
+    showNotice(strips_[(size_t)strip].channelName, name.trim().isEmpty() ? "Hardware name restored" : "Renamed");
+}
 
 int ConsoleModel::local(Param p, int bus, int id, int cardValue) const {
     const auto it = overrides_.find({ perMix(p) ? bus : -1, id, (int)p });
