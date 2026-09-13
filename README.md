@@ -56,7 +56,7 @@ Faithful separate replicas of MOTU's originals, not a merged tool.
 
 | App | Framework | Status |
 |---|---|---|
-| CueMix FX | JUCE | planned in stages: `docs/CUEMIX-PLAN.md` |
+| CueMix FX | JUCE | console roughed in, live and read-only; staged plan in `docs/CUEMIX-PLAN.md` |
 | MOTU PCI Audio Setup | JUCE | every control wired and stress-tested; not yet in daily use |
 | MOTU PCI SMPTE Setup | — | shelved, unused |
 

@@ -70,3 +70,4 @@ function(motu_sign target)
 endfunction()
 
 add_subdirectory(src/pci-audio-setup)
+add_subdirectory(src/cuemix-fx)

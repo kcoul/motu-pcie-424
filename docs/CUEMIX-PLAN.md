@@ -165,6 +165,19 @@ checked.
   and an encoding.
 
 ### 2. A plain working mixer
+
+**Roughed in (2026-09-12), read-only.** `src/cuemix-fx/` has these pieces:
+- One strip per active input, rebuilt live as channels are enabled: 12 with a
+  lone HD192, up to 96.
+- A MIX popup of every output pair that CueMix accepts as a bus.
+- The master fader and mute for the selected mix, plus the fader budget.
+- Everything polls the card at 10 Hz, so changes made elsewhere show.
+- Hovering a strip names it in the LCD.
+
+Not written yet: any control. Fader dB (20·log10(v/32768)), pan (v−64) and trim
+(v−64) displays are placeholders until stage 1 verifies the laws. There are no
+meters yet.
+
 - A JUCE window with one strip per active input, bound to the card: trim,
   input mute, pan, fader, solo and mute for the selected mix; MIX and OUTPUT
   popups; master fader and mute; the fader-budget readout.
