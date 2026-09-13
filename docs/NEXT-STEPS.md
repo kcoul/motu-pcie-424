@@ -16,7 +16,7 @@ State at the end of the 2026-09-12 session.
 - Stress-tested with no crashes after the stale-Interface fix.
 - MOTU's original icon.
 
-**CueMix FX: console roughed in, live, read-only.**
+**CueMix FX: console roughed in, live; controls move but are not sent.**
 - **Skins:** Classic is pixel-matched to MOTU's, using MOTU's own sprites
   (`assets/classic/`). Modern has the same layout. Switch in the application menu.
 - **Live from the card:** strips = active inputs (12 with a lone HD192, up to
@@ -24,8 +24,11 @@ State at the end of the 2026-09-12 session.
   talkback state.
 - **Menu bar identical to MOTU's.** Unbuilt items say in the LCD which stage
   delivers them.
-- **Placeholders:** MONO/STEREO, Scope sources, meters, the trim/pan/dB scales
-  and the dim-knob range.
+- **Every control is interactive** in both skins, as local values the LCD marks
+  "not sent". *Revert to Card Values* drops them. `ConsoleModel::setLocal` is
+  the future write path.
+- **Placeholders:** meters, Scope audio, the trim/pan/dB scales and the dim-knob
+  range.
 - MOTU's original icon.
 
 **Tools**
