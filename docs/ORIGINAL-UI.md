@@ -138,23 +138,112 @@ Verified from those shots, against the live card:
 - The popup contents are all real card data and all reproduced by our wrapper —
   14 clock sources, 6 sample rates, the Default In/Out channel-pair lists.
 
-What is still uncaptured: the **HD192 Options** pane and the **24I/O Options**
-pane (we have only the 2408mk3 one), and CueMix FX's menus and Talkback panel.
+### Interface Options panes
 
-Still to capture from Mojave:
+All three are now captured. Each is a small titled window (`HD192 Options`,
+`24IO Options`, `2408mk3 Options`) ending in a `firmware X.Y hw X.Y` line.
 
-1. **HD192 Options** pane — the one with Clip/Peak time-outs and the AES/EBU
-   controls. We have its six live selector values but not its layout.
-2. **24I/O Options** pane (Input Reference Level + Word Out Rate).
-3. CueMix FX menus, and the Talkback/Listenback panel.
+**HD192** (`firmware 1.1 hw 1.1`), three groups divided by rules:
 
-Already captured, in `docs/reference/`:
+```
+AES/EBU Input Options:   Steal Inputs   [None        ]
+                         [ ] Rate Convert
+AES/EBU Output Options:  Mirror Analog  [Out 1-2     ]
+                         Output Clock   [System      ]
+Meter Options:           Clip Time-out       [1 Minute ]
+                         Peak/Hold Time-out  [2 Seconds]
+```
+
+Six controls for exactly the six selectors the HD192 implements. There is
+**no output Rate Convert control**, although the old string list suggested one.
+See `CHANNEL-STATE.md` for how the controls map to keys.
+
+**24I/O** (`firmware 1.1 hw 1.0`): *Input Reference Level* in **three groups of
+eight**: `Analog 1-8`, `9-16`, `17-24`, each with a `+4 dBu` / `-10 dBV` radio
+pair. Below that, *Word Out Rate* `[Match system clock]`. Unlike the 2408mk3's
+four pairs, it has no ADAT Mode row.
+
+## CueMix FX — captured
+
+The menu bar is `CueMix FX  File  Edit  Devices  Configurations  Talkback
+Phones  Control Surfaces  Window`. Menu contents, as shown with a PCI-424
+selected. Items in *italics* are greyed out:
+
+| Menu | Items |
+|---|---|
+| CueMix FX | About CueMix FX… · Services ▸ · Hide CueMix FX ⌘H · Hide Others ⌥⌘H · *Show All* · Quit CueMix FX ⌘Q |
+| File | *Save Hardware Preset… ⌥⌘S* · *Load Hardware Preset… ⌥⌘O* · — · Peak Hold Time ▸ · — · *Mix 1 Return Includes Computer Output* · ✓ Hardware Follows Console Stereo Settings · — · Close ⌘W |
+| Edit | *Undo ⌘Z* · *Redo ⇧⌘Z* · — · Copy ⌘C · *Paste ⌘V* · — · Clear Peaks ⌘\ · (Start Dictation… is added by the system) |
+| Devices | ✓ PCI-424 ⌘1 · FFT Analysis · Oscilloscope · X-Y Plot · Phase Analysis · Tuner |
+| Configurations | Create New… ⌘N · *Save ⌘S* · *Save To… ⇧⌘S* · *Delete…* · — · Import… · *Export…* |
+| Talkback | Configure Talkback/Listenback… ⇧⌘T · Toggle Talkback ⌘T · Toggle Listenback ⌘L |
+| Phones | **opens to nothing** on a PCI-424 |
+| Control Surfaces | Application Follows Control Surface · Share Surfaces with Other Applications · CueMix Control Surfaces ▸ (Enabled · Configure…) · — · Configure OSC Devices… |
+| Window | Minimize ⌘M · *Zoom* · — · Bring All to Front · — · ✓ PCI-424 |
+
+The PCI File menu is shorter than `LocalizableStrings.xml` suggests. *Save To
+File…*, *Load From File…*, *Edit Channel Names…* and *Show Meter in Dock Icon*
+are absent, and so is *Factory Defaults* from Configurations. Those items belong
+to the FireWire/USB boxes.
+
+Two menus could not be opened on Mojave and are recovered from the strings file
+instead:
+
+- **Peak Hold Time ▸** (submenu would not open): `Off`, `2 Seconds`,
+  `4 Seconds`, `10 Seconds`, `1 Minute`, `5 Minutes`, `Infinite`. This is the
+  order in the strings file. `com.motu.CueMixFX.plist` on Mojave holds
+  `PeakHoldTime = 3`, which would be *10 Seconds* if that order is the menu
+  order (unverified).
+- **Phones**: the only strings are `Follow Active Mix` and the phones output
+  names (`Phones 1-2`, `Phones Out 1/2`). PCI interfaces have no phones bus, so an
+  empty menu is almost certainly correct behaviour, not a capture failure. The
+  replica should keep the empty menu so the bar matches.
+
+Windows and dialogs:
+
+- **Configure Talkback/Listenback** (`cuemix-talkback-configure.png`) is a
+  sheet over the console with a scrolling table (`Output` · `Bus` · `Talk` ·
+  `Listen`), one row per output pair (`HD192:Analog/AES 1-2` → `Mix 1`, …),
+  two checkboxes per row, and *Done*.
+- **Create configuration** is a dark AwesomeLib-skinned panel, not a system
+  sheet: *Configuration name:* field, `cancel` / `ok` in lower case.
+- The two **Disabled ▾** popups in the Talkback/Listenback cluster list
+  `Disabled` followed by every input as `Interface: Name`. The **Scope Channel
+  Selection** Left/Right popups list the same inputs *without* the interface
+  prefix. The talkback/listenback file names assume the left popup was captured
+  first.
+- **CueMix Control Surfaces ▸ Configure…** gives *Can't configure control
+  surfaces / No compatible surfaces are installed. / Do you want to view the
+  help file?* (No / Yes). There is also **MOTU CueMix Mackie Control Surface
+  Settings**: *Edit settings for* popup, *Group*, *Group position*, Help… /
+  Cancel / OK.
+- **OSC Configuration**: headers *Application Follows Control Surface* and
+  *Synchronize*, a lavender striped list (`PCI-424` / `port 64184` / `+`),
+  and `HOST: <hostname> <any>` with `ok`.
+- **Devices ▸ analysis windows**, each titled `PCI-424 - <name>` and resizable:
+  FFT Analysis, Oscilloscope, X-Y Plot, Phase Analysis, and the fixed-size,
+  fully skinned Tuner. All take their sources from Scope Channel Selection
+  (`Console L` / `Console R`). They are audio-rate displays, so they need the
+  scope audio path, not the level-meter API.
+
+## Reference index
+
+Everything in `docs/reference/`:
 
 | file | what |
 |---|---|
 | `setup-main-hd192/24io-2/24io-3/2408mk3.png` | main window, one per interface |
 | `setup-popup-*.png` | every popup's contents |
-| `setup-options-2408mk3.png` | the 2408mk3 Options pane |
+| `setup-options-hd192/24io/2408mk3.png` | the three Options panes |
 | `setup-menu-file.png` | the File menu |
 | `channel-names-top/scrolled.png` | `MOTU Channel Names` |
 | `cuemix-console-full.png` | CueMix FX, all four interfaces, PCI skin |
+| `cuemix-menubar.png`, `cuemix-menu-*.png`, `cuemix-submenu-*.png` | every CueMix menu except Phones and Peak Hold Time |
+| `cuemix-popup-talkback/listenback-input.png`, `cuemix-popup-scope-left/right.png` | right-panel popups |
+| `cuemix-talkback-configure.png`, `cuemix-dialog-create-configuration.png` | talkback sheet, config dialog |
+| `cuemix-alert-no-control-surfaces.png`, `cuemix-mackie-settings.png`, `cuemix-osc-configuration.png` | control-surface windows |
+| `cuemix-fft-analysis/oscilloscope/xy-plot/phase-analysis/tuner.png` | Devices-menu analysis windows |
+
+Nothing further is needed from Mojave except the **HD192 Options popup lists**
+(Steal Inputs, Mirror Analog, Output Clock, Clip / Peak/Hold Time-out). They
+would settle the value encodings questioned in `CHANNEL-STATE.md`.

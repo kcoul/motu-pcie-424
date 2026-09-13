@@ -27,24 +27,29 @@ State after the screenshot / channel-state session.
    Everything it needs is now wrapped. The grid reflows per interface: 6 pairs
    in 2 columns for the HD192, 12 in 3 for a 24I/O, 4 under each of the
    2408mk3's three bank popups.
-2. **Interface Options panes.** `getOption`/`setOption` already say which
-   controls each interface should show. The 2408mk3 pane is captured; the HD192
-   and 24I/O panes still need a Mojave screenshot.
+2. **Interface Options panes.** All three panes are captured, and
+   `getOption`/`setOption` already say which controls each one shows. Two HD192
+   rows are unresolved: Mirror Analog is mapped by elimination, and Clip vs
+   Peak/Hold may be crossed (`CHANNEL-STATE.md`). The values live in the per-OS
+   prefs at `Interfaces[n].DeviceSpecific`, not on the card.
 3. **Edit Channel Names.** Custom names live in the per-OS prefs plist, not on
    the card (`docs/CHANNEL-STATE.md`), so this window owns that storage. An
    importer for the Mojave names would be worth having.
 4. **Wire up `CommitChanges` / `FlushPrefs`** — nothing persists yet. Resolve
    the enabled-vs-active question in `CHANNEL-STATE.md` first.
-5. **Start `src/cuemix-fx/`.** `cuemix-console-full.png` gives the strip order,
-   the LCD, the right-hand PCI panel, the mix selector and the Talkback/Listen
-   cluster. Still needed: its menus and the Talkback panel.
+5. **Start `src/cuemix-fx/`.** Fully captured: the console, every menu, the
+   Talkback/Listenback sheet, the configuration and control-surface dialogs,
+   and the five Devices-menu analysis windows (`ORIGINAL-UI.md`). Phones is
+   genuinely empty on PCI. Peak Hold Time's list is recovered from the strings
+   file.
 6. Level meters (`ReadLevelMeters`, CueMix slot 21) are still unwrapped; the
    `AudioWireLevelMeterRequest/Results` layout is unknown.
 
 ## Still to capture from Mojave
 
-- HD192 Options pane, 24I/O Options pane.
-- CueMix FX menus and the Talkback/Listenback panel.
+- Only the **HD192 Options popup lists** (Clip Time-out, Peak/Hold Time-out,
+  Steal Inputs, Mirror Analog, Output Clock). They settle the two uncertain key
+  mappings.
 
 ## Build
 
@@ -72,6 +77,19 @@ tools/build.sh MotuProbe src/common/motu_card.mm src/common/motu_probe.mm && \
 Ad-hoc signing gives every build a new cdhash, so TCC treats each rebuild as a
 new app and re-prompts for the microphone. `tools/build.sh` and `motu_sign()`
 now use an `Apple Development` identity if the keychain has one.
+
+A grant made by an *earlier* build is stored with that build's requirement,
+so a correctly signed build still gets *"Failed to match existing code
+requirement"* in the `com.apple.TCC` log and prompts once more. Allowing it then
+rewrites the grant against the certificate. MotuProbe was re-granted on
+2026-09-12, and a byte-identical relaunch then went through without a prompt.
+MotuDump and the PCI Audio Setup app may each prompt one more time. If one keeps
+prompting after that, check the log:
+
+```sh
+log show --last 10m --style compact \
+  --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "zenbox"'
+```
 
 If `security find-identity -v -p codesigning` reports **0 valid identities**
 while an `Apple Development` cert is present, the WWDR intermediate has expired

@@ -73,12 +73,12 @@ Selectors come from the jump table at `0x9884` (9 int32 offsets):
 | sel | key | control |
 |---|---|---|
 | 0 | `AnalogMirror` | 2408mk3 "Bank to mirror on Analog" |
-| 1 | `AESOutputSRCMode` | HD192 AES/EBU output rate convert |
+| 1 | `AESOutputSRCMode` | HD192 Mirror Analog (by elimination, below) |
 | 2 | `AESInputSteal` | HD192 "Steal Inputs" |
-| 3 | `AESOutputClock` | HD192 fixed frequency / match system clock |
+| 3 | `AESOutputClock` | HD192 AES/EBU Output Clock |
 | 4 | `AESInputSRC` | HD192 AES/EBU input rate convert |
-| 5 | `PeakHoldTime` | meter peak/hold time-out |
-| 6 | `ClipHoldTime` | meter clip time-out |
+| 5 | `PeakHoldTime` | HD192 meter time-out (Clip/Peak may be crossed) |
+| 6 | `ClipHoldTime` | HD192 meter time-out |
 | 7 | `InputLevels` | input reference level, +4 dBu / −10 dBV |
 | 8 | `WordOutRange` | word out rate |
 
@@ -99,8 +99,40 @@ shows Bank-to-mirror, Input Reference Level and Word Out Rate, and nothing else.
 Its three live values agree too: `AnalogMirror=0` = "Bank A", `WordOutRange=0` =
 "Match system clock", `InputLevels=0` = all pairs +4 dBu.
 
-`InputLevels` is therefore a bitfield, one bit per pair, set = −10 dBV. Only the
-all-zero case has been observed, so the bit order is still unverified.
+`InputLevels` is a bitfield with **set = −10 dBV**. That is now confirmed: the
+Mojave `24IO Options` pane shows all three groups at −10 dBV, and the Mojave
+prefs hold `InputLevels = 7` for both 24I/Os. There is one bit per radio row,
+so 4 bits (pairs `1-2`…`7-8`) on the 2408mk3 and **3 bits (`1-8`, `9-16`,
+`17-24`) on a 24I/O**. Only all-clear and all-set have been seen, so the bit
+order is still unverified.
+
+### The HD192 pane, key by key
+
+`setup-options-hd192.png` has exactly six controls for the six selectors:
+
+| control | key | Mojave pane | prefs value |
+|---|---|---|---|
+| Steal Inputs `[None]` | `AESInputSteal` | None | 0 |
+| Rate Convert checkbox (AES/EBU *input*) | `AESInputSRC` | off | 0 |
+| Mirror Analog `[Out 1-2]` (AES/EBU *output*) | `AESOutputSRCMode`? | Out 1-2 | 0 |
+| Output Clock `[System]` | `AESOutputClock` | System | 0 |
+| Clip Time-out | `ClipHoldTime`? | 1 Minute | 1 |
+| Peak/Hold Time-out | `PeakHoldTime`? | 2 Seconds | 4 |
+
+Two rows are uncertain:
+
+- **`AESOutputSRCMode` → Mirror Analog** is assigned only by elimination. The
+  pane has no output rate-convert control, so the name does not describe what
+  the console shows. It is the only HD192 key left over.
+- **Clip vs Peak/Hold may be crossed.** CueMix FX's Peak Hold Time list is
+  `Off, 2 s, 4 s, 10 s, 1 min, 5 min, Infinite`. On that scale
+  `PeakHoldTime = 4` is *1 Minute* and `ClipHoldTime = 1` is *2 Seconds*, which
+  is exactly the pane with the two rows swapped. Either the jump-table names are
+  crossed, or the HD192 popups use their own list. One screenshot of either
+  popup's contents settles it. Until then, do not wire these two by name.
+
+**ADAT Mode Type I / Type II** is *not* an OtherInterfaceOp selector. Type II is
+S/MUX, so it is the card-level `GetSMUXOptionSetting` / `SetSMUXOptionSetting`.
 
 **ADAT Mode Type I / Type II** is *not* an OtherInterfaceOp selector. Type II is
 S/MUX, so it is the card-level `GetSMUXOptionSetting` / `SetSMUXOptionSetting`.
@@ -144,13 +176,29 @@ Sequoia's copy has 19 set while the live API reports 84 enabled, so the plist is
 the last *saved* state, not the live one — more evidence that the
 enabled-vs-active gap is about what has been committed.
 
-### Interface options are not in the prefs
+### Interface options *are* in the prefs, per OS
 
-The `Interfaces` array holds only `Type` (192, 2410, 2410, 2403). None of the
-`OtherInterfaceOp` keys appear anywhere in the plist, on either volume, so those
-settings are driver/interface state rather than per-OS preference — which means
-a Mojave screenshot of an Options pane can be trusted to verify the values we
-read on Sequoia, not just the layout.
+An earlier revision of this file said the `Interfaces` array held only `Type`
+and that options were card state shared across volumes. **That was wrong.** Each
+`Interfaces[n]` entry is:
+
+```
+{ Type = 192 | 2410 | 2403,
+  Banks = [ personality per bank ],
+  DeviceSpecific = { <OtherInterfaceOp key> = value, ... } }
+```
+
+and `DeviceSpecific` holds exactly the keys `getOption` finds on that interface.
+
+The two volumes disagree, and the card follows whichever OS is booted. On
+Mojave both 24I/Os have `InputLevels = 7` (the pane shows −10 dBV). On Sequoia
+the plist and the live `getOption` both say `0`. The driver loads
+`DeviceSpecific` into its pending dictionary at start-up, which is the dictionary
+`OtherInterfaceOp`'s GET reads.
+
+So a Mojave Options screenshot verifies **layout and encoding**, not the values
+you will read on Sequoia. Compare it against the *Mojave* plist. The HD192 and
+2408mk3 happen to hold the same values on both volumes.
 
 Consequences for the port:
 
@@ -160,4 +208,6 @@ Consequences for the port:
   different prefs file in a different slot. The Big Sur volume has four
   (`bus6`, `bus7`, `bus8`, `bus19`) from exactly that.
 - Importing the Mojave names is a plain plist copy of `InputNames` /
-  `OutputNames`, and would be a kindness.
+  `OutputNames`, and would be a kindness. The same importer could offer
+  `Interfaces[n].DeviceSpecific`: the Mojave setup has the 24I/Os at −10 dBV,
+  and Sequoia has them at +4 dBu.

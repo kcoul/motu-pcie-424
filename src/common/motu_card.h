@@ -202,13 +202,13 @@ public:
     // key each one names is recovered from the driver's jump table:
     enum class Option {
         AnalogMirror     = 0,   // 2408mk3: bank mirrored on the analog outs
-        AESOutputSRCMode = 1,   // HD192: AES/EBU output rate convert
+        AESOutputSRCMode = 1,   // HD192: "Mirror Analog" (by elimination; see CHANNEL-STATE.md)
         AESInputSteal    = 2,   // HD192: steal inputs
-        AESOutputClock   = 3,   // HD192: fixed frequency vs match system clock
+        AESOutputClock   = 3,   // HD192: AES/EBU "Output Clock"
         AESInputSRC      = 4,   // HD192: AES/EBU input rate convert
-        PeakHoldTime     = 5,   // meter peak/hold time-out
-        ClipHoldTime     = 6,   // meter clip time-out
-        InputLevels      = 7,   // input reference level, +4 dBu / -10 dBV
+        PeakHoldTime     = 5,   // HD192 meter time-out; Clip vs Peak/Hold may be crossed
+        ClipHoldTime     = 6,   // HD192 meter time-out; see PeakHoldTime
+        InputLevels      = 7,   // reference level bitfield, one bit per row, set = -10 dBV
         WordOutRange     = 8,   // word out rate
     };
 
