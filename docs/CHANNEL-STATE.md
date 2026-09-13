@@ -123,6 +123,35 @@ with keys `InputNames` / `OutputNames` (96 entries each), alongside
 and `SMPTE`. The Sequoia copy has 96 empty name slots; the names were typed on
 another boot volume and stay there.
 
+Names are **UTF-16LE `<data>` blobs with a BOM**, not plist strings:
+
+```
+InputNames[0] = ff fe 43 00 6f 00 6e 00 73 00 6f 00 6c 00 65 00 20 00 4c 00
+                         C     o     n     s     o     l     e           L
+```
+
+so a naive plist read shows them as empty. Decoding those blobs off the Mojave
+volume is the whole of the migration.
+
+### The enable array is per *pair*
+
+`InputChannels` holds **48** entries, not 96 — one per channel pair, matching
+the console's grid, which is drawn in pairs (`1-2`, `3-4`, …). The Mojave copy
+has **30 of 48 set = 60 channels**, which is the `Ins enabled 60` the
+screenshots show, independently of the `GetInputState` decode above.
+
+Sequoia's copy has 19 set while the live API reports 84 enabled, so the plist is
+the last *saved* state, not the live one — more evidence that the
+enabled-vs-active gap is about what has been committed.
+
+### Interface options are not in the prefs
+
+The `Interfaces` array holds only `Type` (192, 2410, 2410, 2403). None of the
+`OtherInterfaceOp` keys appear anywhere in the plist, on either volume, so those
+settings are driver/interface state rather than per-OS preference — which means
+a Mojave screenshot of an Options pane can be trusted to verify the values we
+read on Sequoia, not just the layout.
+
 Consequences for the port:
 
 - Channel names will not appear until they are set on *this* OS, and the
