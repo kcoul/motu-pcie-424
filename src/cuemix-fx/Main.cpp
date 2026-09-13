@@ -14,7 +14,84 @@
 #include "ConsoleModel.h"
 
 namespace {
-enum CommandIds { kClassic = 0x3001, kModern, kLocate };
+enum CommandIds {
+    kClassic = 0x3001, kModern, kLocate,
+    // File
+    kSaveHardwarePreset = 0x3100, kLoadHardwarePreset, kMix1Return, kHardwareFollowsStereo, kClose,
+    // Edit
+    kUndo = 0x3200, kRedo, kCopy, kPaste, kClearPeaks,
+    // Devices
+    kDevice = 0x3300, kFFT, kOscilloscope, kXYPlot, kPhase, kTuner,
+    // Configurations
+    kCreateConfig = 0x3400, kSaveConfig, kSaveConfigTo, kDeleteConfig, kImportConfig, kExportConfig,
+    // Talkback
+    kConfigureTalkback = 0x3500, kToggleTalkback, kToggleListenback,
+    // Control Surfaces
+    kAppFollowsSurface = 0x3600, kShareSurfaces, kSurfacesEnabled, kSurfacesConfigure, kConfigureOSC,
+    // Window
+    kMinimise = 0x3700, kZoom, kBringAllToFront, kShowConsole,
+};
+
+// Peak Hold Time submenu items (plain menu items, not commands).
+constexpr int kPeakHoldBase = 0x3900;
+const char* const kPeakHoldTimes[] = { "Off", "2 Seconds", "4 Seconds", "10 Seconds", "1 Minute", "5 Minutes", "Infinite" };
+
+using Mods = juce::ModifierKeys;
+constexpr int kCmd = Mods::commandModifier, kShift = Mods::shiftModifier, kAlt = Mods::altModifier;
+
+// MOTU's menus exactly as captured on Mojave (docs/ORIGINAL-UI.md):
+// name, shortcut, whether MOTU enabled it on a PCI card, and whether ours works yet.
+struct MenuCommand {
+    int id;
+    const char* name;
+    juce::juce_wchar key;
+    int mods;
+    bool enabledOnPCI;
+    const char* stage;   // nullptr = implemented; otherwise which plan stage delivers it
+};
+
+const MenuCommand kCommands[] = {
+    { kSaveHardwarePreset, "Save Hardware Preset...", 's', kCmd | kAlt, false, nullptr },
+    { kLoadHardwarePreset, "Load Hardware Preset...", 'o', kCmd | kAlt, false, nullptr },
+    { kMix1Return, "Mix 1 Return Includes Computer Output", 0, 0, false, nullptr },
+    { kHardwareFollowsStereo, "Hardware Follows Console Stereo Settings", 0, 0, true, nullptr },
+    { kClose, "Close", 'w', kCmd, true, nullptr },
+    { kUndo, "Undo", 'z', kCmd, false, nullptr },
+    { kRedo, "Redo", 'z', kCmd | kShift, false, nullptr },
+    { kCopy, "Copy", 'c', kCmd, true, "stage 5 (copy/paste a mix)" },
+    { kPaste, "Paste", 'v', kCmd, false, nullptr },
+    { kClearPeaks, "Clear Peaks", '\\', kCmd, true, "stage 3 (meters)" },
+    { kDevice, "PCI-424", '1', kCmd, true, nullptr },
+    { kFFT, "FFT Analysis", 0, 0, true, "stage 6 (analysis windows)" },
+    { kOscilloscope, "Oscilloscope", 0, 0, true, "stage 6 (analysis windows)" },
+    { kXYPlot, "X-Y Plot", 0, 0, true, "stage 6 (analysis windows)" },
+    { kPhase, "Phase Analysis", 0, 0, true, "stage 6 (analysis windows)" },
+    { kTuner, "Tuner", 0, 0, true, "stage 6 (analysis windows)" },
+    { kCreateConfig, "Create New...", 'n', kCmd, true, "stage 5 (configurations)" },
+    { kSaveConfig, "Save", 's', kCmd, false, nullptr },
+    { kSaveConfigTo, "Save To...", 's', kCmd | kShift, false, nullptr },
+    { kDeleteConfig, "Delete...", 0, 0, false, nullptr },
+    { kImportConfig, "Import...", 0, 0, true, "stage 5 (configurations)" },
+    { kExportConfig, "Export...", 0, 0, false, nullptr },
+    { kConfigureTalkback, "Configure Talkback/Listenback...", 't', kCmd | kShift, true, "stage 4 (talkback)" },
+    { kToggleTalkback, "Toggle Talkback", 't', kCmd, true, "stage 4 (talkback)" },
+    { kToggleListenback, "Toggle Listenback", 'l', kCmd, true, "stage 4 (talkback)" },
+    { kAppFollowsSurface, "Application Follows Control Surface", 0, 0, true, "stage 7 (control surfaces)" },
+    { kShareSurfaces, "Share Surfaces with Other Applications", 0, 0, true, "stage 7 (control surfaces)" },
+    { kSurfacesEnabled, "Enabled", 0, 0, true, "stage 7 (control surfaces)" },
+    { kSurfacesConfigure, "Configure...", 0, 0, true, "stage 7 (control surfaces)" },
+    { kConfigureOSC, "Configure OSC Devices...", 0, 0, true, "stage 7 (control surfaces)" },
+    { kMinimise, "Minimize", 'm', kCmd, true, nullptr },
+    { kZoom, "Zoom", 0, 0, false, nullptr },
+    { kBringAllToFront, "Bring All to Front", 0, 0, true, nullptr },
+    { kShowConsole, "PCI-424", 0, 0, true, nullptr },
+};
+
+const MenuCommand* findCommand(int id) {
+    for (const auto& c : kCommands)
+        if (c.id == id) return &c;
+    return nullptr;
+}
 }
 
 class CueMixApplication : public juce::JUCEApplication, private juce::MenuBarModel {
@@ -52,7 +129,13 @@ public:
         commands_.setFirstCommandTarget(this);
         window_->addKeyListener(commands_.getKeyMappings());
         setApplicationCommandManagerToWatch(&commands_);
-        juce::MenuBarModel::setMacMainMenu(this);
+        // MOTU's menu bar has no View menu, so the skin choice lives in the
+        // application menu, keeping the rest of the bar identical to theirs.
+        juce::PopupMenu appExtras;
+        appExtras.addCommandItem(&commands_, kClassic);
+        appExtras.addCommandItem(&commands_, kModern);
+        appExtras.addCommandItem(&commands_, kLocate);
+        juce::MenuBarModel::setMacMainMenu(this, &appExtras);
     }
 
     void shutdown() override {
@@ -75,7 +158,7 @@ private:
 
         // Resizable in width only; the height is the skin's.
         void setConsole(juce::Component* console, int idealWidth, int height) {
-            const int screenW = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userBounds.getWidth();
+            const int screenW = (int)juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userBounds.getWidth();
             console->setSize(juce::jmin(idealWidth, (int)screenW - 2), height);
             setContentOwned(console, true);
             setResizable(true, false);
@@ -126,31 +209,90 @@ private:
 
     // --- menus ---------------------------------------------------------------
 
-    juce::StringArray getMenuBarNames() override { return { "View" }; }
+    juce::StringArray getMenuBarNames() override {
+        return { "File", "Edit", "Devices", "Configurations", "Talkback", "Phones", "Control Surfaces", "Window" };
+    }
 
-    juce::PopupMenu getMenuForIndex(int, const juce::String&) override {
+    juce::PopupMenu getMenuForIndex(int, const juce::String& name) override {
         juce::PopupMenu m;
-        m.addCommandItem(&commands_, kClassic);
-        m.addCommandItem(&commands_, kModern);
-        m.addSeparator();
-        m.addCommandItem(&commands_, kLocate);
+        auto add = [&](std::initializer_list<int> ids) { for (int id : ids) m.addCommandItem(&commands_, id); };
+        if (name == "File") {
+            add({ kSaveHardwarePreset, kLoadHardwarePreset });
+            m.addSeparator();
+            juce::PopupMenu peak;
+            const int current = prefs_->getIntValue("PeakHoldTime", 1);
+            for (int i = 0; i < (int)std::size(kPeakHoldTimes); ++i)
+                peak.addItem(kPeakHoldBase + i, kPeakHoldTimes[i], true, i == current);
+            m.addSubMenu("Peak Hold Time", peak);
+            m.addSeparator();
+            add({ kMix1Return, kHardwareFollowsStereo });
+            m.addSeparator();
+            add({ kClose });
+        } else if (name == "Edit") {
+            add({ kUndo, kRedo });
+            m.addSeparator();
+            add({ kCopy, kPaste });
+            m.addSeparator();
+            add({ kClearPeaks });
+        } else if (name == "Devices") {
+            add({ kDevice, kFFT, kOscilloscope, kXYPlot, kPhase, kTuner });
+        } else if (name == "Configurations") {
+            add({ kCreateConfig, kSaveConfig, kSaveConfigTo, kDeleteConfig });
+            m.addSeparator();
+            add({ kImportConfig, kExportConfig });
+        } else if (name == "Talkback") {
+            add({ kConfigureTalkback, kToggleTalkback, kToggleListenback });
+        } else if (name == "Phones") {
+            // Empty on PCI cards, exactly as MOTU's is: they have no phones bus.
+        } else if (name == "Control Surfaces") {
+            add({ kAppFollowsSurface, kShareSurfaces });
+            juce::PopupMenu surfaces;
+            surfaces.addCommandItem(&commands_, kSurfacesEnabled);
+            surfaces.addCommandItem(&commands_, kSurfacesConfigure);
+            m.addSubMenu("CueMix Control Surfaces", surfaces);
+            m.addSeparator();
+            add({ kConfigureOSC });
+        } else if (name == "Window") {
+            add({ kMinimise, kZoom });
+            m.addSeparator();
+            add({ kBringAllToFront });
+            m.addSeparator();
+            add({ kShowConsole });
+        }
         return m;
     }
-    void menuItemSelected(int, int) override {}
+
+    void menuItemSelected(int id, int) override {
+        if (id >= kPeakHoldBase && id < kPeakHoldBase + (int)std::size(kPeakHoldTimes)) {
+            // Meters don't move yet, so the setting is only remembered for now.
+            prefs_->setValue("PeakHoldTime", id - kPeakHoldBase);
+            model_->showNotice("Peak Hold Time", juce::String(kPeakHoldTimes[id - kPeakHoldBase]) + " (meters: stage 3)");
+        }
+    }
 
     void getAllCommands(juce::Array<juce::CommandID>& ids) override {
         JUCEApplication::getAllCommands(ids);
         ids.addArray({ kClassic, kModern, kLocate });
+        for (const auto& c : kCommands) ids.add(c.id);
     }
 
     void getCommandInfo(juce::CommandID id, juce::ApplicationCommandInfo& info) override {
         switch (id) {
             case kClassic: info.setInfo("Classic Skin", {}, "View", 0);
-                           info.setActive(skin_ && skin_->ok()); info.setTicked(classic_); break;
-            case kModern:  info.setInfo("Modern Skin", {}, "View", 0); info.setTicked(!classic_); break;
-            case kLocate:  info.setInfo("Locate MOTU CueMix FX.app...", {}, "View", 0); break;
-            default:       JUCEApplication::getCommandInfo(id, info); break;
+                           info.setActive(skin_ && skin_->ok()); info.setTicked(classic_); return;
+            case kModern:  info.setInfo("Modern Skin", {}, "View", 0); info.setTicked(!classic_); return;
+            case kLocate:  info.setInfo("Locate MOTU CueMix FX.app...", {}, "View", 0); return;
+            default: break;
         }
+        if (const auto* c = findCommand(id)) {
+            info.setInfo(c->name, {}, "CueMix", 0);
+            if (c->key != 0) info.addDefaultKeypress(c->key, juce::ModifierKeys(c->mods));
+            info.setActive(c->enabledOnPCI);
+            if (id == kHardwareFollowsStereo) info.setTicked(prefs_->getBoolValue("HardwareFollowsStereo", true));
+            if (id == kDevice || id == kShowConsole) info.setTicked(model_ && model_->connected());
+            return;
+        }
+        JUCEApplication::getCommandInfo(id, info);
     }
 
     bool perform(const InvocationInfo& info) override {
@@ -158,8 +300,23 @@ private:
             case kClassic: if (skin_ && skin_->ok()) showSkin(true); return true;
             case kModern:  showSkin(false); return true;
             case kLocate:  locateOriginal(); return true;
-            default:       return JUCEApplication::perform(info);
+            case kClose:   systemRequestedQuit(); return true;
+            case kMinimise: window_->setMinimised(true); return true;
+            case kDevice:
+            case kShowConsole:
+            case kBringAllToFront: window_->toFront(true); return true;
+            case kHardwareFollowsStereo:
+                prefs_->setValue("HardwareFollowsStereo", !prefs_->getBoolValue("HardwareFollowsStereo", true));
+                commands_.commandStatusChanged();
+                return true;
+            default: break;
         }
+        if (const auto* c = findCommand(info.commandID)) {
+            if (c->stage != nullptr) model_->showNotice(juce::String(c->name).upToFirstOccurrenceOf("...", false, false),
+                                                        "Not yet: " + juce::String(c->stage));
+            return true;
+        }
+        return JUCEApplication::perform(info);
     }
 
     juce::ApplicationCommandManager commands_;

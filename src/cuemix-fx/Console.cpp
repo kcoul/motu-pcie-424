@@ -86,7 +86,11 @@ void Console::modelChanged(bool layout) {
     master_.setValue(model_.masterVolume(), juce::dontSendNotification);
     masterValue_.setText(volumeText(model_.masterVolume()), juce::dontSendNotification);
     masterMute_.setToggleState(model_.masterMute(), juce::dontSendNotification);
-    outputLabel_.setText("OUTPUT  " + model_.mixOutputName(model_.selectedMix()), juce::dontSendNotification);
+    if (model_.noticeTitle().isNotEmpty()) showInLcd(model_.noticeTitle(), model_.noticeDetail());
+    const auto& tb = model_.talkback();
+    outputLabel_.setText("OUTPUT  " + model_.mixOutputName(model_.selectedMix()) + "\nTALK " + tb.talkName
+                         + (tb.talk ? " (on)" : "") + "   LISTEN " + tb.listenName + (tb.listen ? " (on)" : ""),
+                         juce::dontSendNotification);
     const auto r = model_.resources();
     lcdBudget_.setText(juce::String(r.used) + " out of " + juce::String(r.max) + " faders in use\n"
                        + juce::String((int)strips.size()) + " inputs, " + juce::String(model_.numMixes()) + " mixes",
@@ -119,7 +123,7 @@ void Console::resized() {
     auto mix = panel.removeFromTop(26);
     mixLabel_.setBounds(mix.removeFromLeft(40));
     mixBox_.setBounds(mix);
-    outputLabel_.setBounds(panel.removeFromTop(22));
+    outputLabel_.setBounds(panel.removeFromTop(34));
 
     panel.removeFromTop(8);
     banner_.setBounds(panel.removeFromBottom(64));

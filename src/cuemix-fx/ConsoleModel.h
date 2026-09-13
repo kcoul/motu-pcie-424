@@ -51,6 +51,26 @@ public:
     motu::CueMix::Resources resources() const { return resources_; }
     int cueMixFaders() const { return cueMixFaders_; }
 
+    // Talkback / Listenback, read-only. An input of 4095 means Disabled; the dim
+    // levels' range is not verified (0-255 assumed for display).
+    struct Talkback {
+        int talkInput = 4095, listenInput = 4095;
+        int talkDim = 0, listenDim = 0;
+        bool talk = false, listen = false, link = false;
+        juce::String talkName = "Disabled", listenName = "Disabled";
+        bool operator!=(const Talkback& o) const {
+            return talkInput != o.talkInput || listenInput != o.listenInput || talkDim != o.talkDim
+                || listenDim != o.listenDim || talk != o.talk || listen != o.listen || link != o.link;
+        }
+    };
+    const Talkback& talkback() const { return talkback_; }
+
+    // A short message for the LCD, e.g. for menu items not implemented yet.
+    // Clears itself after a few seconds.
+    void showNotice(const juce::String& title, const juce::String& detail);
+    juce::String noticeTitle() const { return noticeTitle_; }
+    juce::String noticeDetail() const { return noticeDetail_; }
+
     std::function<void(bool layoutChanged)> onChange;
 
 private:
@@ -71,6 +91,9 @@ private:
     bool masterMute_ = false;
     motu::CueMix::Resources resources_;
     int cueMixFaders_ = 0;
+    Talkback talkback_;
+    juce::String noticeTitle_, noticeDetail_;
+    juce::uint32 noticeUntil_ = 0;
 };
 
 // Tentative displays. Only 32768 = 0 dB and 64 = centre are observed; the laws

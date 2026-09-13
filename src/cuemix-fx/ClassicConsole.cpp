@@ -163,8 +163,9 @@ void ClassicConsole::paintPanel(juce::Graphics& g, int rx) {
 
     // LCD: hovered control, then the fader budget. "Sequencer" is what the card
     // reports in use beyond CueMix's own mixes (tentative).
-    left(g, lcdTitle_, 18.0f, kLcd, rx + 27, 30, 210);
-    left(g, lcdDetail_, 11.0f, kLcd, rx + 27, 47, 210);
+    const bool notice = model_.noticeTitle().isNotEmpty();
+    left(g, notice ? model_.noticeTitle() : lcdTitle_, 18.0f, kLcd, rx + 27, 30, 210);
+    left(g, notice ? model_.noticeDetail() : lcdDetail_, 11.0f, kLcd, rx + 27, 47, 210);
     const auto r = model_.resources();
     const int cuemix = model_.cueMixFaders();
     left(g, juce::String(r.used) + " out of " + juce::String(r.max) + " faders in use", 11.5f, kLcd, rx + 27, 110, 210);
@@ -193,18 +194,25 @@ void ClassicConsole::paintPanel(juce::Graphics& g, int rx) {
     skin_.drawFrame(g, "ColorButtons", 24, 17, model_.masterMute() ? 1 : 0, 2, rx + 59, 428);
     centred(g, "MUTE", 9.5f, kLabel, rx + 70, 448, 30);
 
-    // Talkback / Listenback (not read from the card yet).
-    for (int px : { 111, 186 }) {
+    // Talkback / Listenback, as the card reports them (read-only).
+    const auto& tb = model_.talkback();
+    const std::pair<int, juce::String> sources[] = { { 111, tb.talkName }, { 186, tb.listenName } };
+    for (auto& [px, name] : sources) {
         skin_.draw(g, "MenuShort", rx + px, 214);
-        left(g, "Disabled", 11.0f, kLabel, rx + px + 6, 224, 44);
+        juce::Graphics::ScopedSaveState s(g);
+        g.reduceClipRegion(rx + px + 3, 214, 44, 21);
+        left(g, name, 11.0f, kLabel, rx + px + 6, 224, 60);
     }
-    const std::pair<int, const char*> buttons[] = { { 118, "TALK" }, { 161, "LINK" }, { 205, "LISTEN" } };
-    for (auto& [px, label] : buttons) {
-        skin_.drawFrame(g, "TalkbackButton", 37, 37, 0, 0, rx + px, 241);
-        centred(g, label, 9.5f, kLabel, rx + px + 18, 259, 36);
+    const struct { int px; const char* label; bool on; } buttons[] = {
+        { 118, "TALK", tb.talk }, { 161, "LINK", tb.link }, { 205, "LISTEN", tb.listen } };
+    for (auto& b : buttons) {
+        skin_.drawFrame(g, "TalkbackButton", 37, 37, b.on ? 1 : 0, 0, rx + b.px, 241);
+        centred(g, b.label, 9.5f, kLabel, rx + b.px + 18, 259, 36);
     }
-    skin_.drawFrame(g, "SmallKnobBlack", 31, 31, 4, rx + 119, 288);
-    skin_.drawFrame(g, "SmallKnobBlack", 31, 31, 32, rx + 206, 288);
+    // Dim knobs: frame 4-60 across an assumed 0-255 range.
+    auto dimFrame = [](int v) { return 4 + juce::jlimit(0, 56, v * 56 / 255); };
+    skin_.drawFrame(g, "SmallKnobBlack", 31, 31, dimFrame(tb.talkDim), rx + 119, 288);
+    skin_.drawFrame(g, "SmallKnobBlack", 31, 31, dimFrame(tb.listenDim), rx + 206, 288);
     centred(g, "MONITOR", 9.0f, kLabel, rx + 177, 298, 50);
     centred(g, "DIM", 9.0f, kLabel, rx + 177, 306, 50);
 

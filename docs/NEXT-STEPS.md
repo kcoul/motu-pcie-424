@@ -36,13 +36,17 @@ State after the 2026-09-12 PCI Audio Setup session.
 1. **CueMix stage 1 on Mojave with MotuSpy** (`docs/CUEMIX-PLAN.md`). Pass
    signal through channels so meters and clip LEDs show up too; that needs
    `ReadLevelMeters` decoded, which snapshots can't do alone.
-2. **Standalone, no Mojave or M4 needed:**
-   - **Edit Channel Names** (below).
-   - **CueMix menu bar skeleton** from the captured menus.
-   - **Read-only talkback**: its getters are already wrapped.
-3. **Edit Channel Names window.** MOTU's helper is i386. `motu_prefs.mm` can
-   already read another volume's names (UTF-16 blobs); the window and the
-   `setChannelName` + commit write path are not built yet.
+2. **Done 2026-09-12 (standalone items):**
+   - **Edit Channel Names** in PCI Audio Setup. `SetCustomChannelNameCFString`
+     takes effect immediately (CoreAudio's category name changes), and an empty
+     name restores the hardware name. *Import Names…* copies another volume's
+     names by channel id; the Mojave file decodes to 60 named inputs.
+   - **CueMix menu bar** identical to MOTU's. Unbuilt items say which stage
+     delivers them in the LCD; the skin choice sits in the application menu.
+   - **Talkback read-only** in both skins: sources, TALK/LINK/LISTEN, dim knobs.
+     The dim range is assumed 0-255.
+3. **Verify the channel-name import end to end** by importing the Mojave names,
+   then check they persist in `~/Library/Preferences/com.motu.PCIAudio/`.
 4. **Put PCI Audio Setup into daily use**, then install it into `/Applications`
    once trusted.
 5. Modern skin polish once features are done (Classic is the reference).

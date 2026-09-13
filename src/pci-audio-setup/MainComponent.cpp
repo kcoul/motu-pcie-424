@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 
+#include "ChannelNamesWindow.h"
 #include "OptionsWindow.h"
 
 namespace {
@@ -93,7 +94,7 @@ MainComponent::MainComponent() {
     routingToggle_.onClick = [this] { setRoutingEnabled(routingToggle_.getToggleState()); };
     volumeToggle_.onClick  = [this] { setVolumeControlsEnabled(volumeToggle_.getToggleState()); };
     optionsButton_.onClick = [this] { showInterfaceOptions(); };
-    namesButton_.setEnabled(false);   // MOTU Channel Names is not ported yet
+    namesButton_.onClick = [this] { showChannelNames(); };
 
     juce::PropertiesFile::Options opts;
     opts.applicationName     = "MOTU PCI Audio Setup";
@@ -115,6 +116,7 @@ MainComponent::~MainComponent() {
         card_.flushPrefs(e);
     }
     motu::device::removeListener(listener_);
+    namesWindow_.reset();
     optionsWindow_.reset();
 }
 
@@ -256,6 +258,7 @@ void MainComponent::rebuildGrid() {
     audiowireLabel_.setText(live ? "Audiowire: " + juce::String(currentWire_ + 1) : "Audiowire:",
                             juce::dontSendNotification);
     optionsButton_.setEnabled(live);
+    namesButton_.setEnabled((bool)card_);
     routingToggle_.setEnabled((bool)card_);
     routingToggle_.setToggleState(routingEnabled_, juce::dontSendNotification);
     setSize(kWidth, routingEnabled_ ? kHeight : kHeight - kGridHeight);
@@ -547,6 +550,14 @@ void MainComponent::loadConfiguration() {
 void MainComponent::showInterfaceOptions() {
     if (!card_ || currentWire_ < 0) return;
     optionsWindow_ = OptionsWindow::create(*this, card_, currentWire_, [this] { optionsWindow_.reset(); });
+}
+
+void MainComponent::showChannelNames() {
+    if (!card_) return;
+    if (namesWindow_) { namesWindow_->toFront(true); return; }
+    // Names change the Default In/Out labels (they come from CoreAudio's names).
+    namesWindow_ = ChannelNamesWindow::create(*this, card_, [this] { refreshDefaults(); },
+                                              [this] { namesWindow_.reset(); });
 }
 
 // --- layout ------------------------------------------------------------------

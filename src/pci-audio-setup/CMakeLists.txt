@@ -7,6 +7,7 @@ juce_add_gui_app(PCIAudioSetup
     MICROPHONE_PERMISSION_TEXT   "Access to the MOTU PCIe-424 audio inputs.")
 
 target_sources(PCIAudioSetup PRIVATE
+    ChannelNamesWindow.cpp
     Main.cpp
     MacLookAndFeel.cpp
     MainComponent.cpp

@@ -192,6 +192,9 @@ meters yet.
 - **Check:** feed a known level and compare against MOTU's meters on Mojave.
 
 ### 4. Talkback / Listenback
+- **Read side done:** the Classic panel shows the card's talkback and listenback
+  sources (4095 = Disabled), TALK / LINK / LISTEN and the dim knobs. The dim
+  range is unverified.
 - Input popups, TALK / LINK / LISTEN, dim knobs, the Configure sheet (per
   output: which mix bus, Talk, Listen), and Toggle ⌘T / ⌘L.
 - **Check:** diff each control on Mojave, then test with a mic.

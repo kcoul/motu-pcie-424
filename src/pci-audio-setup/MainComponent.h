@@ -24,6 +24,7 @@ public:
     void refresh();
     void probeAndRefresh();             // File > Refresh: re-probe the AudioWire ports first
     void showInterfaceOptions();
+    void showChannelNames();
     void selectInterface(int index);    // position in the Configure Interface popup
     void saveConfiguration();
     void loadConfiguration();
@@ -112,7 +113,7 @@ private:
     juce::TextButton   namesButton_   { "Edit Channel Names..." };
     juce::ToggleButton volumeToggle_  { "Enable Volume Controls" };
 
-    std::unique_ptr<juce::DocumentWindow> optionsWindow_;
+    std::unique_ptr<juce::DocumentWindow> optionsWindow_, namesWindow_;
     std::unique_ptr<juce::FileChooser> chooser_;
 
     // Enable Routing is the console's own preference, per device (MOTU kept it

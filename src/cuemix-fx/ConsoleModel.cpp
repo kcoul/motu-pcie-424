@@ -46,7 +46,19 @@ void ConsoleModel::selectMix(int index) {
     if (onChange) onChange(false);
 }
 
+void ConsoleModel::showNotice(const juce::String& title, const juce::String& detail) {
+    noticeTitle_ = title;
+    noticeDetail_ = detail;
+    noticeUntil_ = juce::Time::getMillisecondCounter() + 4000;
+    if (onChange) onChange(false);
+}
+
 void ConsoleModel::refresh() {
+    if (noticeUntil_ != 0 && juce::Time::getMillisecondCounter() > noticeUntil_) {
+        noticeUntil_ = 0;
+        noticeTitle_ = noticeDetail_ = {};
+        if (onChange) onChange(false);
+    }
     if (!card_) return;
     const bool layout = syncLayout();
     const bool values = poll();
@@ -124,6 +136,29 @@ bool ConsoleModel::poll() {
     const auto res = cue.resources(e);
     int faders = 0;
     for (int b : buses_) faders += juce::jmax(0, cue.busResourceUsage(e, b));
+    Talkback tb;
+    if (motu::Talkback api = card_.talkback(e)) {
+        tb.talkInput = api.talkbackInput(e);
+        tb.listenInput = api.listenbackInput(e);
+        tb.talkDim = api.talkbackDimLevel(e);
+        tb.listenDim = api.listenbackDimLevel(e);
+        tb.talk = api.talkbackEnable(e) != 0;
+        tb.listen = api.listenbackEnable(e) != 0;
+        tb.link = api.talkbackLink(e) != 0;
+    }
+    if (tb != talkback_) {
+        // Name the sources the way the strips do; anything else is Disabled.
+        auto nameOf = [this](int id) -> juce::String {
+            for (const auto& st : strips_)
+                if (st.id == id) return st.channelName;
+            return "Disabled";
+        };
+        tb.talkName = nameOf(tb.talkInput);
+        tb.listenName = nameOf(tb.listenInput);
+        talkback_ = tb;
+        changed = true;
+    }
+
     if (vol != masterVolume_ || mute != masterMute_ || res.used != resources_.used || res.max != resources_.max
         || faders != cueMixFaders_) {
         masterVolume_ = vol;
