@@ -240,7 +240,16 @@ void ClassicConsole::paintPanel(juce::Graphics& g, int rx) {
     left(g, model_.mixName(model_.selectedMix()), 12.0f, kWellText, rx + 144, 351, 70);
 
     // Scope Channel Selection (local only until the scope exists).
-    centred(g, "Scope Channel Selection", 10.5f, kLabel, rx + 167, 378, 140);
+    // The group frame's top edge (row 378 of the art) runs through the title;
+    // MOTU breaks it behind the text, so clear a gap in the panel's grey first.
+    {
+        const juce::String title = "Scope Channel Selection";
+        // 12 px matches the original title's 98 px width; the line stops at the "S" and "n".
+        const int w = (int)std::ceil(juce::GlyphArrangement::getStringWidth(ClassicSkin::font(12.0f), title));
+        g.setColour(juce::Colour(218, 217, 217));
+        g.fillRect(rx + 168 - w / 2 - 1, 372, w, 12);
+        centred(g, title, 12.0f, kLabel, rx + 168, 377, 140);
+    }
     left(g, "Left", 11.0f, kLabel, rx + 114, 398, 30);
     left(g, "Right", 11.0f, kLabel, rx + 114, 423, 30);
     const auto& strips = model_.strips();
