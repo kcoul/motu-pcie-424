@@ -23,19 +23,30 @@ State after the 2026-09-12 PCI Audio Setup session.
     segfault past the end.
 - **CueMix buses are output pairs** (48, numbered 0, 2, … 94).
 - **MotuSpy** is on the Mojave Desktop for differential reverse-engineering.
+- **CueMix FX console** (`src/cuemix-fx/`) follows the card live and is read-only.
+  - Classic skin: pixel-matched to MOTU's, from MOTU's own sprites in
+    `assets/classic/`. Modern skin: same layout. Switch with View.
+  - Real data: strips = active inputs; MIX = output-pair buses; master fader and
+    mute; fader budget.
+  - Placeholders: MONO/STEREO, talkback section, Scope popups, meters, and the
+    trim/pan scales.
 
 ## Next
 
 1. **CueMix stage 1 on Mojave with MotuSpy** (`docs/CUEMIX-PLAN.md`). Pass
    signal through channels so meters and clip LEDs show up too; that needs
    `ReadLevelMeters` decoded, which snapshots can't do alone.
-2. **Edit Channel Names window.** MOTU's helper is i386. `motu_prefs.mm` can
+2. **Standalone, no Mojave or M4 needed:**
+   - **Edit Channel Names** (below).
+   - **CueMix menu bar skeleton** from the captured menus.
+   - **Read-only talkback**: its getters are already wrapped.
+3. **Edit Channel Names window.** MOTU's helper is i386. `motu_prefs.mm` can
    already read another volume's names (UTF-16 blobs); the window and the
    `setChannelName` + commit write path are not built yet.
-3. **Put PCI Audio Setup into daily use**, then install it into `/Applications`
+4. **Put PCI Audio Setup into daily use**, then install it into `/Applications`
    once trusted.
-4. Classic vs modern skins, once features are done.
-5. Tidy `ORIGINAL-UI.md` against the corrections above.
+5. Modern skin polish once features are done (Classic is the reference).
+6. Tidy `ORIGINAL-UI.md` against the corrections above.
 
 ## Still to capture from Mojave
 
