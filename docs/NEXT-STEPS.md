@@ -1,60 +1,75 @@
 # Next steps
 
-State after the 2026-09-12 PCI Audio Setup session.
+State at the end of the 2026-09-12 session.
 
-## Settled
+## Where things stand
 
-- **PCI Audio Setup is functionally complete** and survived a stress test.
-  Every write follows the call sequence recovered by disassembling MOTU's own
-  console (symbols intact): `docs/CHANNEL-STATE.md`.
-  - Channel checkboxes, Bank personalities, Enable Routing (and its "Disable"
-    bank item), Enable Volume Controls (`'Mvol'`), Default In/Out.
-  - All three Options panes, with MOTU's value lists.
-  - Save/Load Configuration (`.mcfg`), Refresh (re-probe), live refresh.
-- **Corrections to earlier sessions:**
-  - `GetInputState`'s bytes are `exists, enabled` (not the other way round).
-  - Output enable is `source == -1`.
-  - The HD192 Clip and Peak/Hold keys are crossed.
-  - Interface options live in the per-OS prefs.
-- **Hazards found:**
-  - A commit can make the driver rebuild its Interface objects, so never cache
-    one.
-  - The CueMix balance/width/mapping getters do no bounds checking and
-    segfault past the end.
-- **CueMix buses are output pairs** (48, numbered 0, 2, … 94).
-- **MotuSpy** is on the Mojave Desktop for differential reverse-engineering.
-- **CueMix FX console** (`src/cuemix-fx/`) follows the card live and is read-only.
-  - Classic skin: pixel-matched to MOTU's, from MOTU's own sprites in
-    `assets/classic/`. Modern skin: same layout. Switch with View.
-  - Real data: strips = active inputs; MIX = output-pair buses; master fader and
-    mute; fader budget.
-  - Placeholders: MONO/STEREO, talkback section, Scope popups, meters, and the
-    trim/pan scales.
+**MOTU PCI Audio Setup: feature-complete, not yet in daily use.**
+- Every control is wired to the call sequence recovered by disassembling MOTU's
+  own console (`docs/CHANNEL-STATE.md`):
+  - channel checkboxes, bank personalities, Enable Routing (with its "Disable"
+    bank item), Enable Volume Controls, Default In/Out;
+  - all three Options panes;
+  - Save/Load Configuration, Refresh, live refresh from CoreAudio.
+- **Edit Channel Names** replaces MOTU's i386 helper. *Import Names…* brought
+  all 60 Mojave names across, and the driver saved them to this OS's prefs.
+- Stress-tested with no crashes after the stale-Interface fix.
+- MOTU's original icon.
 
-## Next
+**CueMix FX: console roughed in, live, read-only.**
+- **Skins:** Classic is pixel-matched to MOTU's, using MOTU's own sprites
+  (`assets/classic/`). Modern has the same layout. Switch in the application menu.
+- **Live from the card:** strips = active inputs (12 with a lone HD192, up to
+  96), MIX = output-pair buses, master fader and mute, fader budget, and
+  talkback state.
+- **Menu bar identical to MOTU's.** Unbuilt items say in the LCD which stage
+  delivers them.
+- **Placeholders:** MONO/STEREO, Scope sources, meters, the trim/pan/dB scales
+  and the dim-knob range.
+- MOTU's original icon.
 
-1. **CueMix stage 1 on Mojave with MotuSpy** (`docs/CUEMIX-PLAN.md`). Pass
-   signal through channels so meters and clip LEDs show up too; that needs
-   `ReadLevelMeters` decoded, which snapshots can't do alone.
-2. **Done 2026-09-12 (standalone items):**
-   - **Edit Channel Names** in PCI Audio Setup. `SetCustomChannelNameCFString`
-     takes effect immediately (CoreAudio's category name changes), and an empty
-     name restores the hardware name. *Import Names…* copies another volume's
-     names by channel id; the Mojave file decodes to 60 named inputs.
-   - **CueMix menu bar** identical to MOTU's. Unbuilt items say which stage
-     delivers them in the LCD; the skin choice sits in the application menu.
-   - **Talkback read-only** in both skins: sources, TALK/LINK/LISTEN, dim knobs.
-     The dim range is assumed 0-255.
-3. **Verify the channel-name import end to end** by importing the Mojave names,
-   then check they persist in `~/Library/Preferences/com.motu.PCIAudio/`.
-4. **Put PCI Audio Setup into daily use**, then install it into `/Applications`
-   once trusted.
-5. Modern skin polish once features are done (Classic is the reference).
-6. Tidy `ORIGINAL-UI.md` against the corrections above.
+**Tools**
+- **MotuSpy** is on the Mojave Desktop: snapshot every readable card value,
+  change one thing in MOTU's app, snapshot again, and it diffs the two.
+- `src/motu-spy/bounds.mm` found the CueMix index ranges, and that the
+  balance/width/mapping getters segfault past the end.
+
+## Next session: pick one
+
+1. **Stage 0 on the M4 + UltraLite mk3 Hybrid** (`docs/CUEMIX-PLAN.md`).
+   Live, with Claude Code alongside CueMix FX:
+   - check the binary: symbols, and whether the PCI backend (`CoreDeviceAW`)
+     is still in it;
+   - write an OSC logger for CueMix's parameter tree, including `/meters`
+     and the `…/str` display strings;
+   - write the results up as `docs/CUEMIX-MODEL.md`.
+2. **Stage 1 on Mojave with MotuSpy.** Work through the controls in the plan's
+   capture order: fader dB steps, pan, trim, solo/mute, MIX and OUTPUT,
+   talkback. Plan a signal-through session for meters and clip LEDs:
+   `ReadLevelMeters` needs decoding and snapshots alone won't do it.
+
+Either one unlocks the same thing: **making CueMix's controls write**, starting
+with faders, pan, mute and solo, once the encodings are known.
+
+## Small known issues
+
+- CueMix only re-reads channel names when the set of active inputs changes, so
+  renames made while it is open show after a relaunch.
+- The Modern skin can open scrolled a few strips in.
+- The dim-knob range (0–255) and the "Sequencer using N faders" figure are
+  guesses.
+- `ORIGINAL-UI.md` predates the corrections in `CHANNEL-STATE.md`.
+
+## Later
+
+- Put PCI Audio Setup into daily use, including at the HD192-only studio, then
+  install both apps to `/Applications` once trusted.
+- CueMix stages 3–8: meters, talkback writes, configurations, analysis windows,
+  control surfaces, and Modern skin polish.
 
 ## Still to capture from Mojave
 
-- CueMix FX behaviour, via MotuSpy (stage 1).
+- CueMix FX behaviour and meters, via MotuSpy (see above).
 
 ## Build
 
@@ -64,6 +79,7 @@ DEVELOPER_DIR=/Library/Developer/CommandLineTools \
   cmake -B build/cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
 DEVELOPER_DIR=/Library/Developer/CommandLineTools cmake --build build/cmake -j8
 open "build/cmake/src/pci-audio-setup/PCIAudioSetup_artefacts/Release/MOTU PCI Audio Setup.app"
+open "build/cmake/src/cuemix-fx/CueMixFX_artefacts/Release/CueMix FX.app"
 ```
 
 `DEVELOPER_DIR` is required: Xcode's licence is unaccepted, so CMake must be
