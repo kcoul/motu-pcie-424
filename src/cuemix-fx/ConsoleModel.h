@@ -5,16 +5,18 @@
 #include "motu_card.h"
 
 #include <functional>
+#include <map>
+#include <tuple>
 #include <vector>
 
 // The CueMix values one input strip shows, for the mix currently selected.
 struct StripState {
-    int trim = 64, inputMute = 0;          // per input
-    int volume = 32768, pan = 64;          // per (mix bus, input)
-    int mute = 0, solo = 0;
+    int trim = 64, inputMute = 0, stereo = 0;     // per input (stereo is not read yet)
+    int volume = 32768, pan = 64;                 // per (mix bus, input)
+    int mute = 0, solo = 0, balWidth = 0;         // balWidth: 0 = BAL, 1 = WIDTH (not read yet)
     bool operator==(const StripState& o) const {
-        return trim == o.trim && inputMute == o.inputMute && volume == o.volume && pan == o.pan
-            && mute == o.mute && solo == o.solo;
+        return trim == o.trim && inputMute == o.inputMute && stereo == o.stereo && volume == o.volume
+            && pan == o.pan && mute == o.mute && solo == o.solo && balWidth == o.balWidth;
     }
     bool operator!=(const StripState& o) const { return !(*this == o); }
 };
@@ -30,7 +32,11 @@ struct StripInfo {
 // reports whether the layout (strips, mixes) or only values changed.
 //
 // The strip set is the card's active inputs; the mixes are the output pairs
-// CueMix accepts as buses (docs/CUEMIX-PLAN.md). Read-only for now.
+// CueMix accepts as buses (docs/CUEMIX-PLAN.md).
+//
+// Nothing is written to the card yet. Controls can still be moved: a moved
+// value is kept locally, shown instead of the card's, and reported in the LCD as
+// "not sent". Once encodings are verified, setLocal becomes the write path.
 class ConsoleModel : private juce::Timer {
 public:
     ConsoleModel();
@@ -71,6 +77,20 @@ public:
     juce::String noticeTitle() const { return noticeTitle_; }
     juce::String noticeDetail() const { return noticeDetail_; }
 
+    // Every control a skin can move.
+    enum class Param {
+        Trim, InputMute, Stereo,                         // per input
+        Volume, Pan, Mute, Solo, BalWidth,               // per input, per mix
+        MasterVolume, MasterMute,                        // per mix
+        TalkInput, ListenInput, TalkDim, ListenDim, Talk, Listen, Link,
+        ScopeLeft, ScopeRight,                           // strip index
+    };
+    // `strip` is an index into strips(), for the per-input parameters.
+    void setLocal(Param, int value, int strip = -1);
+    bool hasLocalChanges() const { return !overrides_.empty(); }
+    void clearLocalChanges();
+    int scopeSource(int side) const;                     // strip index, 0 = Left
+
     std::function<void(bool layoutChanged)> onChange;
 
 private:
@@ -94,6 +114,11 @@ private:
     Talkback talkback_;
     juce::String noticeTitle_, noticeDetail_;
     juce::uint32 noticeUntil_ = 0;
+
+    // Local values, keyed by (bus or -1, input id or -1, param).
+    std::map<std::tuple<int, int, int>, int> overrides_;
+    int local(Param, int bus, int id, int cardValue) const;
+    int currentBus() const { return buses_.empty() ? -1 : buses_[(size_t)mix_]; }
 };
 
 // Tentative displays. Only 32768 = 0 dB and 64 = centre are observed; the laws

@@ -31,15 +31,17 @@ Console::Console(ConsoleModel& model) : model_(model) {
     styleLabel(outputLabel_, 12.0f, ConsoleLookAndFeel::dim());
     styleLabel(masterValue_, 12.0f, ConsoleLookAndFeel::text(), juce::Justification::centred);
     styleLabel(banner_, 11.5f, ConsoleLookAndFeel::solo().withAlpha(0.85f), juce::Justification::topLeft);
-    banner_.setText("Read-only first pass: shows the card's CueMix state live. Controls will write "
-                    "once their encodings are verified (docs/CUEMIX-PLAN.md).", juce::dontSendNotification);
+    banner_.setText("Shows the card's CueMix state live. Controls move, but nothing is sent to the "
+                    "card until the encodings are verified (docs/CUEMIX-PLAN.md).", juce::dontSendNotification);
 
     master_.setNormalisableRange({ 0.0, 32768.0, 1.0, 3.0 });
-    master_.setInterceptsMouseClicks(false, false);
+    master_.setDoubleClickReturnValue(true, 32768);
+    master_.onValueChange = [this] { model_.setLocal(ConsoleModel::Param::MasterVolume, (int)master_.getValue()); };
     masterMute_.setColour(juce::TextButton::buttonColourId, ConsoleLookAndFeel::well());
     masterMute_.setColour(juce::TextButton::buttonOnColourId, ConsoleLookAndFeel::mute());
     masterMute_.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
-    masterMute_.setInterceptsMouseClicks(false, false);
+    masterMute_.setTriggeredOnMouseDown(true);
+    masterMute_.onClick = [this] { model_.setLocal(ConsoleModel::Param::MasterMute, masterMute_.getToggleState() ? 0 : 1); };
 
     // Choosing which mix to *view* changes nothing on the card, so it is live.
     mixBox_.onChange = [this] { model_.selectMix(mixBox_.getSelectedItemIndex()); };
@@ -68,6 +70,8 @@ void Console::modelChanged(bool layout) {
         strips_.clear();
         for (const auto& info : strips) {
             auto strip = std::make_unique<Strip>(info.id, info.interfaceName, info.channelName);
+            const int index = (int)strips_.size();
+            strip->onEdit = [this, index](ConsoleModel::Param p, int v) { model_.setLocal(p, v, index); };
             strip->onHover = [this](const Strip& s) {
                 showInLcd(s.channelName(), s.interfaceName() + "  input " + juce::String(s.inputId()));
             };

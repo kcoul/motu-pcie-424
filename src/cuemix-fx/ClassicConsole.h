@@ -5,6 +5,8 @@
 #include "ClassicSkin.h"
 #include "ConsoleModel.h"
 
+#include <optional>
+
 // The Classic skin: MOTU's CueMix FX console for PCI cards, drawn from MOTU's
 // own sprites at the positions measured off docs/reference/cuemix-console-full.png.
 // Everything is painted (no child controls), as AwesomeLib did.
@@ -23,6 +25,8 @@ public:
     void mouseMove(const juce::MouseEvent&) override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
+    void mouseUp(const juce::MouseEvent&) override { drag_ = {}; dragOffset_ = -1; }
+    void mouseDoubleClick(const juce::MouseEvent&) override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     void resized() override { setScroll(scroll_); }
 
@@ -36,6 +40,22 @@ private:
     int contentWidth() const { return (int)model_.strips().size() * kStripPitch; }
     void setScroll(int);
     juce::Rectangle<int> thumbBounds() const;
+
+    // What a mouse press landed on.
+    enum class Kind { None, Toggle, Knob, Fader, Popup };
+    struct Hit {
+        Kind kind = Kind::None;
+        ConsoleModel::Param param = ConsoleModel::Param::Trim;
+        int strip = -1;
+        int value = 0;            // current value (Toggle/Knob/Fader); set value for radio toggles
+        int min = 0, max = 0, centre = 0;
+        juce::Rectangle<int> area;
+    };
+    Hit hitAt(juce::Point<int>) const;
+    void showPopup(const Hit&);
+
+    struct Drag { Hit hit; int startY = 0; int startValue = 0; int startCapTop = 0; };
+    std::optional<Drag> drag_;
 
     ConsoleModel& model_;
     ClassicSkin& skin_;

@@ -7,8 +7,8 @@
 #include <functional>
 
 // One input strip: the input section (MUTE, TRIM, name) above the mix section
-// (PAN, fader, SOLO, MUTE) — the order of MOTU's console. First pass: it shows
-// the card's state and does not write (docs/CUEMIX-PLAN.md, stage 1).
+// (PAN, fader, SOLO, MUTE) — the order of MOTU's console. Moving a control
+// reports it through onEdit; the model keeps it locally (not sent to the card yet).
 class Strip : public juce::Component {
 public:
     static constexpr int kWidth = 84;
@@ -22,6 +22,7 @@ public:
 
     void setState(const StripState&);
     std::function<void(const Strip&)> onHover;
+    std::function<void(ConsoleModel::Param, int value)> onEdit;
 
     void paint(juce::Graphics&) override;
     void resized() override;

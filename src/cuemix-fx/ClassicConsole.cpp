@@ -28,6 +28,24 @@ int faderCapTop(int raw) {
     return 216 + (y - 234);
 }
 
+// The inverse: the level a cap top position stands for (0 at the bottom stop).
+int volumeFromCapTop(int top) {
+    const int y = top - 216 + 234;
+    const size_t n = std::size(kFaderScale);
+    if (y >= kFaderScale[n - 1].y) return 0;
+    if (y <= kFaderScale[0].y) return 32768;
+    for (size_t i = 0; i + 1 < n; ++i) {
+        const auto& a = kFaderScale[i];
+        const auto& b = kFaderScale[i + 1];
+        if (y <= b.y) {
+            if (b.db < -999.0) return 0;   // between -60 and the bottom stop
+            const double db = a.db + (y - a.y) * (b.db - a.db) / (double)(b.y - a.y);
+            return (int)std::lround(32768.0 * std::pow(10.0, db / 20.0));
+        }
+    }
+    return 0;
+}
+
 // KnobRotation: 61 usable frames, 4 = fully left, 32 = centre, 60 = fully right.
 int panFrame(int raw)  { return 4 + juce::jlimit(0, 56, (int)std::lround(raw * 56.0 / 128.0)); }
 // Tentative: 64 shows "0 dB" with the knob at its stop on Mojave.
@@ -109,8 +127,8 @@ void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info, int x)
     centred(g, "STEREO", 10.5f, kLabel, x + 61, 73, 40);
     // Mono/stereo is not read from the card yet; MOTU's default is mono.
     // HalfButtons: row 0 lights on the left edge (MONO), row 1 on the right (STEREO).
-    skin_.drawFrame(g, "HalfButtons", 40, 20, 1, 0, x, 79);
-    skin_.drawFrame(g, "HalfButtons", 40, 20, 0, 1, x + 40, 79);
+    skin_.drawFrame(g, "HalfButtons", 40, 20, st.stereo ? 0 : 1, 0, x, 79);
+    skin_.drawFrame(g, "HalfButtons", 40, 20, st.stereo ? 1 : 0, 1, x + 40, 79);
 
     skin_.drawStretchedV(g, "ChannelNameWell", x, 100, 28, 6);
     skin_.draw(g, "ChannelNameGlare", x + 2, 101);
@@ -123,9 +141,10 @@ void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info, int x)
     centred(g, "PAN", 11.5f, kLabel, x + 66, 163, 30);
     centred(g, panText(st.pan), 12.0f, kWellText, x + 62, 181, 36);
 
-    skin_.drawFrame(g, "CircleCheckBox", 10, 10, 0, x + 4, 193);
+    // BAL / WIDTH only mean something on a stereo strip; MOTU shows both empty on mono.
+    skin_.drawFrame(g, "CircleCheckBox", 10, 10, st.stereo && st.balWidth == 0 ? 1 : 0, x + 4, 193);
     left(g, "BAL", 10.0f, kLabel, x + 16, 198, 24);
-    skin_.drawFrame(g, "CircleCheckBox", 10, 10, 0, x + 40, 193);
+    skin_.drawFrame(g, "CircleCheckBox", 10, 10, st.stereo && st.balWidth == 1 ? 1 : 0, x + 40, 193);
     left(g, "WIDTH", 10.0f, kLabel, x + 52, 198, 30);
 
     skin_.drawFrame(g, "ColorButtons", 24, 17, st.solo ? 1 : 0, 1, x + 1, 300);
@@ -220,7 +239,7 @@ void ClassicConsole::paintPanel(juce::Graphics& g, int rx) {
     left(g, "MIX", 15.0f, kLabel, rx + 114, 350, 30);
     left(g, model_.mixName(model_.selectedMix()), 12.0f, kWellText, rx + 144, 351, 70);
 
-    // Scope Channel Selection (placeholder sources: the first two inputs).
+    // Scope Channel Selection (local only until the scope exists).
     centred(g, "Scope Channel Selection", 10.5f, kLabel, rx + 167, 378, 140);
     left(g, "Left", 11.0f, kLabel, rx + 114, 398, 30);
     left(g, "Right", 11.0f, kLabel, rx + 114, 423, 30);
@@ -228,9 +247,90 @@ void ClassicConsole::paintPanel(juce::Graphics& g, int rx) {
     for (int i = 0; i < 2; ++i) {
         const int y = 390 + i * 25;
         skin_.drawStretchedH(g, "MenuLong", rx + 145, y, 97, 12);
-        centred(g, i < (int)strips.size() ? strips[(size_t)i].channelName : juce::String(), 11.0f, kLabel,
+        const int src = model_.scopeSource(i);
+        centred(g, juce::isPositiveAndBelow(src, (int)strips.size()) ? strips[(size_t)src].channelName : juce::String(), 11.0f, kLabel,
                 rx + 145 + 42, y + 10, 76);
     }
+}
+
+ClassicConsole::Hit ClassicConsole::hitAt(juce::Point<int> p) const {
+    using P = ConsoleModel::Param;
+    Hit h;
+    const auto make = [&](Kind k, P param, int strip, int value, juce::Rectangle<int> area, int min = 0, int max = 1,
+                          int centre = 0) {
+        h.kind = k; h.param = param; h.strip = strip; h.value = value; h.area = area;
+        h.min = min; h.max = max; h.centre = centre;
+    };
+    const int rx = panelX();
+
+    if (p.x >= kStripsLeft && p.x < rx && !(p.y >= kScrollY && p.y < kScrollY + 14)) {
+        const int i = (p.x - kStripsLeft + scroll_) / kStripPitch;
+        const auto& strips = model_.strips();
+        if (!juce::isPositiveAndBelow(i, (int)strips.size())) return h;
+        const auto& st = strips[(size_t)i].state;
+        const int x = kStripsLeft + i * kStripPitch - scroll_;
+        const auto local = p - juce::Point<int>(x, 0);
+        const auto in = [&](int ax, int ay, int aw, int ah) { return juce::Rectangle<int>(ax, ay, aw, ah).contains(local); };
+        const auto at = [&](int ax, int ay, int aw, int ah) { return juce::Rectangle<int>(x + ax, ay, aw, ah); };
+
+        if (in(0, 3, 82, 20))    make(Kind::Toggle, P::InputMute, i, st.inputMute, at(0, 3, 82, 20));
+        else if (in(4, 28, 44, 44))  make(Kind::Knob, P::Trim, i, st.trim, at(4, 28, 44, 44), 64, 120, 64);
+        else if (in(0, 79, 40, 20))  make(Kind::Toggle, P::Stereo, i, 0, at(0, 79, 40, 20));
+        else if (in(40, 79, 40, 20)) make(Kind::Toggle, P::Stereo, i, 1, at(40, 79, 40, 20));
+        else if (in(4, 155, 44, 38)) make(Kind::Knob, P::Pan, i, st.pan, at(4, 155, 44, 38), 0, 128, 64);
+        else if (in(2, 190, 36, 16)) make(Kind::Toggle, P::BalWidth, i, 0, at(2, 190, 36, 16));
+        else if (in(38, 190, 42, 16)) make(Kind::Toggle, P::BalWidth, i, 1, at(38, 190, 42, 16));
+        else if (in(0, 298, 28, 24)) make(Kind::Toggle, P::Solo, i, st.solo, at(0, 298, 28, 24));
+        else if (in(0, 325, 28, 26)) make(Kind::Toggle, P::Mute, i, st.mute, at(0, 325, 28, 26));
+        else if (in(34, 206, 30, 234)) make(Kind::Fader, P::Volume, i, st.volume, at(34, 206, 30, 234), 0, 32768, 32768);
+        // Radio pairs (MONO/STEREO, BAL/WIDTH) carry the value they set, so mark them.
+        if (h.param == P::Stereo || h.param == P::BalWidth) h.max = -1;
+        return h;
+    }
+
+    const auto local = p - juce::Point<int>(rx, 0);
+    const auto in = [&](int ax, int ay, int aw, int ah) { return juce::Rectangle<int>(ax, ay, aw, ah).contains(local); };
+    const auto at = [&](int ax, int ay, int aw, int ah) { return juce::Rectangle<int>(rx + ax, ay, aw, ah); };
+    const auto& tb = model_.talkback();
+
+    if (in(15, 206, 30, 234))        make(Kind::Fader, P::MasterVolume, -1, model_.masterVolume(), at(15, 206, 30, 234), 0, 32768, 32768);
+    else if (in(56, 425, 30, 34))    make(Kind::Toggle, P::MasterMute, -1, model_.masterMute(), at(56, 425, 30, 34));
+    else if (in(111, 214, 59, 21))   make(Kind::Popup, P::TalkInput, -1, tb.talkInput, at(111, 214, 59, 21));
+    else if (in(186, 214, 59, 21))   make(Kind::Popup, P::ListenInput, -1, tb.listenInput, at(186, 214, 59, 21));
+    else if (in(118, 241, 37, 37))   make(Kind::Toggle, P::Talk, -1, tb.talk, at(118, 241, 37, 37));
+    else if (in(161, 241, 37, 37))   make(Kind::Toggle, P::Link, -1, tb.link, at(161, 241, 37, 37));
+    else if (in(205, 241, 37, 37))   make(Kind::Toggle, P::Listen, -1, tb.listen, at(205, 241, 37, 37));
+    else if (in(116, 285, 37, 37))   make(Kind::Knob, P::TalkDim, -1, tb.talkDim, at(116, 285, 37, 37), 0, 255, 0);
+    else if (in(203, 285, 37, 37))   make(Kind::Knob, P::ListenDim, -1, tb.listenDim, at(203, 285, 37, 37), 0, 255, 0);
+    else if (in(138, 341, 100, 20))  make(Kind::Popup, P::Volume, -2, model_.selectedMix(), at(138, 341, 100, 20)); // MIX
+    else if (in(145, 390, 97, 21))   make(Kind::Popup, P::ScopeLeft, -1, model_.scopeSource(0), at(145, 390, 97, 21));
+    else if (in(145, 415, 97, 21))   make(Kind::Popup, P::ScopeRight, -1, model_.scopeSource(1), at(145, 415, 97, 21));
+    return h;
+}
+
+void ClassicConsole::showPopup(const Hit& h) {
+    using P = ConsoleModel::Param;
+    juce::PopupMenu m;
+    const auto& strips = model_.strips();
+    const bool mix = h.strip == -2;
+    const bool source = h.param == P::TalkInput || h.param == P::ListenInput;
+    if (mix) {
+        for (int i = 0; i < model_.numMixes(); ++i)
+            m.addItem(i + 1, model_.mixName(i) + "   " + model_.mixOutputName(i), true, i == h.value);
+    } else {
+        if (source) { m.addItem(4095 + 1, "Disabled", true, h.value == 4095); m.addSeparator(); }
+        for (size_t i = 0; i < strips.size(); ++i) {
+            const int value = source ? strips[i].id : (int)i;
+            m.addItem(value + 1, strips[i].interfaceName + ": " + strips[i].channelName, true, value == h.value);
+        }
+    }
+    const auto screen = localAreaToGlobal(h.area);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(screen).withMinimumWidth(h.area.getWidth()),
+                    [this, h, mix](int result) {
+        if (result <= 0) return;
+        if (mix) model_.selectMix(result - 1);
+        else model_.setLocal(h.param, result - 1);
+    });
 }
 
 void ClassicConsole::mouseMove(const juce::MouseEvent& e) {
@@ -252,21 +352,70 @@ void ClassicConsole::mouseMove(const juce::MouseEvent& e) {
 }
 
 void ClassicConsole::mouseDown(const juce::MouseEvent& e) {
+    drag_ = {};
     dragOffset_ = -1;
     const auto t = thumbBounds();
     if (t.contains(e.getPosition())) { dragOffset_ = e.x - t.getX(); return; }
     // Scroll buttons: left half steps left, right half right.
-    if (e.y >= kScrollY && e.y < kScrollY + 14 && e.x >= panelX() - 37 && e.x < panelX())
+    if (e.y >= kScrollY && e.y < kScrollY + 14 && e.x >= panelX() - 37 && e.x < panelX()) {
         setScroll(scroll_ + (e.x < panelX() - 18 ? -kStripPitch : kStripPitch));
+        return;
+    }
+
+    const auto h = hitAt(e.getPosition());
+    switch (h.kind) {
+        case Kind::None: break;
+        case Kind::Toggle:
+            // Radio pairs set their own value; everything else flips.
+            model_.setLocal(h.param, h.max == -1 ? h.value : (h.value ? 0 : 1), h.strip);
+            break;
+        case Kind::Popup:
+            showPopup(h);
+            break;
+        case Kind::Knob:
+            drag_ = Drag { h, e.y, h.value, 0 };
+            break;
+        case Kind::Fader: {
+            const int top = faderCapTop(h.value);
+            // Grab the cap where it is; a click elsewhere on the track jumps to it.
+            if (e.y < top || e.y > top + 47) {
+                const int newTop = juce::jlimit(216, 388, e.y - 23);
+                model_.setLocal(h.param, volumeFromCapTop(newTop), h.strip);
+                drag_ = Drag { h, e.y, 0, newTop };
+            } else {
+                drag_ = Drag { h, e.y, h.value, top };
+            }
+            break;
+        }
+    }
 }
 
 void ClassicConsole::mouseDrag(const juce::MouseEvent& e) {
+    if (drag_) {
+        const auto& h = drag_->hit;
+        if (h.kind == Kind::Knob) {
+            // About 150 px of travel for the full sweep, like MOTU's knobs.
+            const double perPixel = (h.max - h.min) / 150.0;
+            const int v = juce::jlimit(h.min, h.max, drag_->startValue + (int)std::lround((drag_->startY - e.y) * perPixel));
+            model_.setLocal(h.param, v, h.strip);
+        } else if (h.kind == Kind::Fader) {
+            const int top = juce::jlimit(216, 388, drag_->startCapTop + (e.y - drag_->startY));
+            model_.setLocal(h.param, volumeFromCapTop(top), h.strip);
+        }
+        return;
+    }
     if (dragOffset_ < 0) return;
     const auto t = thumbBounds();
     const int trackW = stripsWidth() - 37 - t.getWidth();
     if (trackW <= 0) return;
     const int x = e.x - dragOffset_ - kStripsLeft;
     setScroll(x * juce::jmax(0, contentWidth() - stripsWidth()) / trackW);
+}
+
+void ClassicConsole::mouseDoubleClick(const juce::MouseEvent& e) {
+    // Double-click returns a knob or fader to its default.
+    const auto h = hitAt(e.getPosition());
+    if (h.kind == Kind::Knob || h.kind == Kind::Fader) model_.setLocal(h.param, h.centre, h.strip);
 }
 
 void ClassicConsole::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w) {

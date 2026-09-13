@@ -22,7 +22,7 @@ void styleButton(juce::TextButton& b, juce::Colour on) {
     b.setColour(juce::TextButton::buttonOnColourId, on);
     b.setColour(juce::TextButton::textColourOffId, ConsoleLookAndFeel::dim());
     b.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
-    b.setInterceptsMouseClicks(false, false);   // read-only first pass
+    b.setTriggeredOnMouseDown(true);
 }
 }  // namespace
 
@@ -32,10 +32,25 @@ Strip::Strip(int inputId, const juce::String& interfaceName, const juce::String&
     styleButton(mute_, ConsoleLookAndFeel::mute());
     styleButton(solo_, ConsoleLookAndFeel::solo());
 
-    trim_.setRange(0, 128, 1);
+    using P = ConsoleModel::Param;
+    trim_.setRange(64, 120, 1);
     pan_.setRange(0, 128, 1);
     fader_.setNormalisableRange({ 0.0, (double)kVolumeMax, 1.0, kFaderSkew });
-    for (auto* s : { &trim_, &pan_, &fader_ }) s->setInterceptsMouseClicks(false, false);
+    trim_.setDoubleClickReturnValue(true, 64);
+    pan_.setDoubleClickReturnValue(true, 64);
+    fader_.setDoubleClickReturnValue(true, kVolumeMax);
+    const std::pair<juce::Slider*, P> sliders[] = { { &trim_, P::Trim }, { &pan_, P::Pan }, { &fader_, P::Volume } };
+    for (auto& [slider, param] : sliders) {
+        auto* sl = slider;
+        const auto pr = param;
+        sl->onValueChange = [this, sl, pr] { if (onEdit) onEdit(pr, (int)sl->getValue()); };
+    }
+    const std::pair<juce::TextButton*, P> buttons[] = { { &inputMute_, P::InputMute }, { &mute_, P::Mute }, { &solo_, P::Solo } };
+    for (auto& [button, param] : buttons) {
+        auto* b = button;
+        const auto pr = param;
+        b->onClick = [this, b, pr] { if (onEdit) onEdit(pr, b->getToggleState() ? 0 : 1); };
+    }
 
     styleLabel(trimValue_, 12.0f, ConsoleLookAndFeel::text());
     styleLabel(panValue_, 12.0f, ConsoleLookAndFeel::text());

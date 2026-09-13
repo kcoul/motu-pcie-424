@@ -113,6 +113,68 @@ bool ConsoleModel::syncLayout() {
     return changed;
 }
 
+namespace {
+using P = ConsoleModel::Param;
+bool perMix(P p) {
+    return p == P::Volume || p == P::Pan || p == P::Mute || p == P::Solo || p == P::BalWidth
+        || p == P::MasterVolume || p == P::MasterMute;
+}
+bool perInput(P p) { return p == P::Trim || p == P::InputMute || p == P::Stereo || perMix(p); }
+}  // namespace
+
+int ConsoleModel::local(Param p, int bus, int id, int cardValue) const {
+    const auto it = overrides_.find({ perMix(p) ? bus : -1, id, (int)p });
+    return it != overrides_.end() ? it->second : cardValue;
+}
+
+int ConsoleModel::scopeSource(int side) const {
+    const int fallback = juce::jmin(side, juce::jmax(0, (int)strips_.size() - 1));
+    return local(side == 0 ? Param::ScopeLeft : Param::ScopeRight, -1, -1, fallback);
+}
+
+void ConsoleModel::clearLocalChanges() {
+    overrides_.clear();
+    poll();
+    if (onChange) onChange(false);
+}
+
+void ConsoleModel::setLocal(Param p, int value, int strip) {
+    const bool isStrip = perInput(p) && p != Param::MasterVolume && p != Param::MasterMute;
+    if (isStrip && !juce::isPositiveAndBelow(strip, (int)strips_.size())) return;
+    const int id = isStrip ? strips_[(size_t)strip].id : -1;
+    overrides_[{ perMix(p) ? currentBus() : -1, id, (int)p }] = value;
+    if (card_) poll();
+
+    // Say what moved, and that it went nowhere.
+    auto onOff = [](int v) { return juce::String(v ? "on" : "off"); };
+    juce::String title = isStrip ? strips_[(size_t)strip].channelName : juce::String(), what;
+    switch (p) {
+        case Param::Trim:         what = "Trim " + juce::String(value - 64) + " dB"; break;
+        case Param::InputMute:    what = "Input mute " + onOff(value); break;
+        case Param::Stereo:       what = value ? "Stereo" : "Mono"; break;
+        case Param::Volume:       what = "Fader " + volumeText(value); break;
+        case Param::Pan:          what = "Pan " + panText(value); break;
+        case Param::Mute:         what = "Mute " + onOff(value); break;
+        case Param::Solo:         what = "Solo " + onOff(value); break;
+        case Param::BalWidth:     what = value ? "Pan knob: width" : "Pan knob: balance"; break;
+        case Param::MasterVolume: title = mixName(mix_); what = "Master " + volumeText(value); break;
+        case Param::MasterMute:   title = mixName(mix_); what = "Master mute " + onOff(value); break;
+        case Param::TalkInput:    title = "Talkback"; what = "Input " + talkback_.talkName; break;
+        case Param::ListenInput:  title = "Listenback"; what = "Input " + talkback_.listenName; break;
+        case Param::TalkDim:      title = "Monitor Dim"; what = "Talkback dim " + juce::String(value); break;
+        case Param::ListenDim:    title = "Monitor Dim"; what = "Listenback dim " + juce::String(value); break;
+        case Param::Talk:         title = "Talkback"; what = onOff(value); break;
+        case Param::Listen:       title = "Listenback"; what = onOff(value); break;
+        case Param::Link:         title = "Talkback"; what = "Link " + onOff(value); break;
+        case Param::ScopeLeft:
+        case Param::ScopeRight:
+            title = "Scope " + juce::String(p == Param::ScopeLeft ? "Left" : "Right");
+            what = juce::isPositiveAndBelow(value, (int)strips_.size()) ? strips_[(size_t)value].channelName : juce::String();
+            break;
+    }
+    showNotice(title, what + "  (not sent)");
+}
+
 bool ConsoleModel::poll() {
     motu::Exception e;
     motu::CueMix cue = card_.cueMix(e);
@@ -122,17 +184,19 @@ bool ConsoleModel::poll() {
     bool changed = false;
     for (auto& s : strips_) {
         StripState st;
-        st.trim = cue.inputTrim(e, s.id);
-        st.inputMute = cue.inputMute(e, s.id);
-        st.volume = cue.volume(e, bus, s.id);
-        st.pan = cue.pan(e, bus, s.id);
-        st.mute = cue.mute(e, bus, s.id);
-        st.solo = cue.solo(e, bus, s.id);
+        st.trim      = local(Param::Trim, bus, s.id, cue.inputTrim(e, s.id));
+        st.inputMute = local(Param::InputMute, bus, s.id, cue.inputMute(e, s.id));
+        st.stereo    = local(Param::Stereo, bus, s.id, 0);
+        st.volume    = local(Param::Volume, bus, s.id, cue.volume(e, bus, s.id));
+        st.pan       = local(Param::Pan, bus, s.id, cue.pan(e, bus, s.id));
+        st.mute      = local(Param::Mute, bus, s.id, cue.mute(e, bus, s.id));
+        st.solo      = local(Param::Solo, bus, s.id, cue.solo(e, bus, s.id));
+        st.balWidth  = local(Param::BalWidth, bus, s.id, 0);
         if (st != s.state) { s.state = st; changed = true; }
     }
 
-    const int vol = cue.busVolume(e, bus);
-    const bool mute = cue.busMute(e, bus);
+    const int vol = local(Param::MasterVolume, bus, -1, cue.busVolume(e, bus));
+    const bool mute = local(Param::MasterMute, bus, -1, cue.busMute(e, bus)) != 0;
     const auto res = cue.resources(e);
     int faders = 0;
     for (int b : buses_) faders += juce::jmax(0, cue.busResourceUsage(e, b));
@@ -146,6 +210,13 @@ bool ConsoleModel::poll() {
         tb.listen = api.listenbackEnable(e) != 0;
         tb.link = api.talkbackLink(e) != 0;
     }
+    tb.talkInput   = local(Param::TalkInput, -1, -1, tb.talkInput);
+    tb.listenInput = local(Param::ListenInput, -1, -1, tb.listenInput);
+    tb.talkDim     = local(Param::TalkDim, -1, -1, tb.talkDim);
+    tb.listenDim   = local(Param::ListenDim, -1, -1, tb.listenDim);
+    tb.talk        = local(Param::Talk, -1, -1, tb.talk) != 0;
+    tb.listen      = local(Param::Listen, -1, -1, tb.listen) != 0;
+    tb.link        = local(Param::Link, -1, -1, tb.link) != 0;
     if (tb != talkback_) {
         // Name the sources the way the strips do; anything else is Disabled.
         auto nameOf = [this](int id) -> juce::String {

@@ -15,7 +15,7 @@
 
 namespace {
 enum CommandIds {
-    kClassic = 0x3001, kModern, kLocate,
+    kClassic = 0x3001, kModern, kLocate, kRevertLocal,
     // File
     kSaveHardwarePreset = 0x3100, kLoadHardwarePreset, kMix1Return, kHardwareFollowsStereo, kClose,
     // Edit
@@ -135,6 +135,8 @@ public:
         appExtras.addCommandItem(&commands_, kClassic);
         appExtras.addCommandItem(&commands_, kModern);
         appExtras.addCommandItem(&commands_, kLocate);
+        appExtras.addSeparator();
+        appExtras.addCommandItem(&commands_, kRevertLocal);
         juce::MenuBarModel::setMacMainMenu(this, &appExtras);
     }
 
@@ -272,7 +274,7 @@ private:
 
     void getAllCommands(juce::Array<juce::CommandID>& ids) override {
         JUCEApplication::getAllCommands(ids);
-        ids.addArray({ kClassic, kModern, kLocate });
+        ids.addArray({ kClassic, kModern, kLocate, kRevertLocal });
         for (const auto& c : kCommands) ids.add(c.id);
     }
 
@@ -282,6 +284,8 @@ private:
                            info.setActive(skin_ && skin_->ok()); info.setTicked(classic_); return;
             case kModern:  info.setInfo("Modern Skin", {}, "View", 0); info.setTicked(!classic_); return;
             case kLocate:  info.setInfo("Locate MOTU CueMix FX.app...", {}, "View", 0); return;
+            // Controls move without writing to the card yet; this drops those values.
+            case kRevertLocal: info.setInfo("Revert to Card Values", {}, "View", 0); return;
             default: break;
         }
         if (const auto* c = findCommand(id)) {
@@ -300,6 +304,7 @@ private:
             case kClassic: if (skin_ && skin_->ok()) showSkin(true); return true;
             case kModern:  showSkin(false); return true;
             case kLocate:  locateOriginal(); return true;
+            case kRevertLocal: model_->clearLocalChanges(); return true;
             case kClose:   systemRequestedQuit(); return true;
             case kMinimise: window_->setMinimised(true); return true;
             case kDevice:
