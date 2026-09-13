@@ -197,6 +197,32 @@ public:
     bool        inputChannelAvailable(Exception&, int ch) const;
     bool        outputChannelAvailable(Exception&, int ch) const;
 
+    // Every per-interface "Options" pane control goes through MOTU's single
+    // OtherInterfaceOp(exc, bool, int selector, int&). Selectors are 0..8; the
+    // key each one names is recovered from the driver's jump table:
+    enum class Option {
+        AnalogMirror     = 0,   // 2408mk3: bank mirrored on the analog outs
+        AESOutputSRCMode = 1,   // HD192: AES/EBU output rate convert
+        AESInputSteal    = 2,   // HD192: steal inputs
+        AESOutputClock   = 3,   // HD192: fixed frequency vs match system clock
+        AESInputSRC      = 4,   // HD192: AES/EBU input rate convert
+        PeakHoldTime     = 5,   // meter peak/hold time-out
+        ClipHoldTime     = 6,   // meter clip time-out
+        InputLevels      = 7,   // input reference level, +4 dBu / -10 dBV
+        WordOutRange     = 8,   // word out rate
+    };
+
+    // NOTE the flag: MOTU's bool is `isGet`, NOT `isSet`. Passing it wrong does
+    // not fail — it silently takes the *write* path and stuffs whatever is in
+    // `value` into the pending-changes dictionary. Hence two methods and no
+    // exposed bool. Disassembly in docs/HALPLUGIN-API.md.
+    //
+    // getOption raises "Couldn't find property in OtherInterfaceOp" for a
+    // selector this interface does not implement, which is how you enumerate
+    // which Options controls an interface should show.
+    bool        getOption(Exception&, Option, int& value) const;
+    void        setOption(Exception&, Option, int value) const;
+
 private:
     void* p_;
 };
@@ -239,11 +265,33 @@ public:
     std::string inputDescription(Exception&, int id) const;
     void        setInputEnable(Exception&, int id, bool);
 
+    // GetInputState hands back two bytes, decoded by probing against MOTU's own
+    // console (docs/CHANNEL-STATE.md):
+    //
+    //   enabled  the "Enable Input" checkbox in PCI Audio Setup's grid, and the
+    //            number the console's "PCI Use: Ins enabled N" line counts.
+    //            0 for ids that no interface populates (an HD192 occupies only
+    //            12 of its 24 id slots), so it also tells you a channel exists.
+    //   active   the channel is in the driver's current stream configuration.
+    //            The total equals numActiveInputs() exactly.
+    //
+    // These two disagree on this rig (84 enabled, 36 active) — see the open
+    // question in docs/CHANNEL-STATE.md before treating either as the other.
+    struct InputState { unsigned char enabled = 0, active = 0; };
+    InputState  inputState(Exception&, int id) const;
+
     int         numOutputs(Exception&) const;
     int         numActiveOutputs(Exception&) const;
     int         nthActiveOutputID(Exception&, int n) const;
     std::string outputDescription(Exception&, int id) const;
     void        setOutputSource(Exception&, int id, int source);
+
+    // GetOutputState: one byte plus an int. The byte parallels
+    // InputState::enabled. The int is the routing source setOutputSource
+    // writes; observed -1 on every active channel here and -2 on every inactive
+    // one, i.e. nothing is explicitly routed on this rig.
+    struct OutputState { unsigned char enabled = 0; int source = -1; };
+    OutputState outputState(Exception&, int id) const;
 
     int         bankRelativeID(Exception&, int id) const;
     std::string channelName(Exception&, int id, bool isInput) const;

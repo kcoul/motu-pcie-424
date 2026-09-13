@@ -37,6 +37,9 @@ using F_cfget  = void  (*)(void*, void*, int, bool, CFStringRef*);
 using F_cfset  = void  (*)(void*, void*, int, bool, CFStringRef);
 using F_v_ip   = void  (*)(void*, void*, unsigned*);
 using F_bank   = void  (*)(void*, void*, int, int, char*);
+using F_instate  = void (*)(void*, void*, int, unsigned char*, unsigned char*);
+using F_outstate = void (*)(void*, void*, int, unsigned char*, int*);
+using F_otherop  = int  (*)(void*, void*, bool, int, int*);
 
 // Fixed-size C-string out-params. MOTU never documents the required buffer
 // size; 256 is comfortably above every string these APIs actually return.
@@ -198,6 +201,27 @@ int  Interface::personalityForBank(Exception& e, int bank) const { e.reset(); re
 bool Interface::inputChannelAvailable(Exception& e, int ch) const  { e.reset(); return fn<F_i_i>(p_, 11)(p_, e.raw, ch) != 0; }
 bool Interface::outputChannelAvailable(Exception& e, int ch) const { e.reset(); return fn<F_i_i>(p_, 12)(p_, e.raw, ch) != 0; }
 
+bool Interface::getOption(Exception& e, Option o, int& value) const {
+    // An interface that does not implement a selector returns *without raising*
+    // and simply leaves the out-param alone, so "no exception" is not enough to
+    // tell a real 0 from an absent property. Call twice with two different
+    // sentinels: if neither is overwritten, nothing was written.
+    int a = 0x5A5A5A5A, b = ~0x5A5A5A5A;
+    e.reset();
+    fn<F_otherop>(p_, 5)(p_, e.raw, true, (int)o, &a);
+    if (e.raised()) return false;
+    fn<F_otherop>(p_, 5)(p_, e.raw, true, (int)o, &b);
+    if (e.raised()) return false;
+    if (a == 0x5A5A5A5A && b == ~0x5A5A5A5A) return false;   // untouched both times
+    value = a;
+    return true;
+}
+
+void Interface::setOption(Exception& e, Option o, int value) const {
+    e.reset();
+    fn<F_otherop>(p_, 5)(p_, e.raw, false, (int)o, &value);
+}
+
 // --- Card ------------------------------------------------------------------
 
 bool Card::installRunLoop(std::string* err) {
@@ -313,11 +337,25 @@ int Card::nthActiveInputID(Exception& e, int n) const { e.reset(); return fn<F_i
 std::string Card::inputDescription(Exception& e, int id) const { return callName(p_, 19, e, id); }
 void Card::setInputEnable(Exception& e, int id, bool v) { e.reset(); fn<F_v_ib>(p_, 21)(p_, e.raw, id, v); }
 
+Card::InputState Card::inputState(Exception& e, int id) const {
+    InputState st;
+    e.reset();
+    fn<F_instate>(p_, 20)(p_, e.raw, id, &st.enabled, &st.active);
+    return st;
+}
+
 int Card::numOutputs(Exception& e) const       { e.reset(); return fn<F_int>(p_, 22)(p_, e.raw); }
 int Card::numActiveOutputs(Exception& e) const { e.reset(); return fn<F_int>(p_, 23)(p_, e.raw); }
 int Card::nthActiveOutputID(Exception& e, int n) const { e.reset(); return fn<F_i_i>(p_, 24)(p_, e.raw, n); }
 std::string Card::outputDescription(Exception& e, int id) const { return callName(p_, 25, e, id); }
 void Card::setOutputSource(Exception& e, int id, int src) { e.reset(); fn<F_v_ii>(p_, 27)(p_, e.raw, id, src); }
+
+Card::OutputState Card::outputState(Exception& e, int id) const {
+    OutputState st;
+    e.reset();
+    fn<F_outstate>(p_, 26)(p_, e.raw, id, &st.enabled, &st.source);
+    return st;
+}
 
 int Card::bankRelativeID(Exception& e, int id) const { e.reset(); return fn<F_i_i>(p_, 28)(p_, e.raw, id); }
 

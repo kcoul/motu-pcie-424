@@ -33,8 +33,16 @@ single stock control.
 | Original | i386, 10.6 SDK, `LSRequiresCarbon=1`, Metrowerks PowerPlant |
 | Bundle ID | `com.motu.pci.config.console` |
 | Version | 1.5 (2003–2011) |
-| Window title | **MOTU PCI Audio Console** (not "Setup") |
+| Window title | **the device name — "PCI-424"**, set at runtime |
 | Content size | **602 × 334** px, `noGrowDocProc` — fixed size, not resizable |
+
+Both confirmed against `docs/reference/setup-main-*.png`: the window frame
+measures 602 px wide and 356 px tall, less Mojave's 22 px title bar = 334.
+
+"MOTU PCI Audio Console" is the *application* name in the menu bar, not the
+window title. The window is titled after the card, and the File menu's two
+blank `MENU 129` slots are where the device list goes — the screenshot shows
+`PCI-424 ⌘1` sitting in them.
 
 The `.rsrc` holds only two `PPob` (PowerPlant object) resources: `128 "Console
 Main Window"` and `130 "Splash"`. **`PPob` 128 is 155 bytes** — a bare
@@ -110,22 +118,43 @@ The 473 px-tall backgrounds and 250 px strips pin the console's vertical
 geometry; the EQ/Dynamics/Reverb/Tuner art belongs to FX-capable interfaces and
 is dead weight for a PCIe-424.
 
-## What is NOT recoverable without running the originals
+## Layout — captured
 
-Static extraction gives us strings, assets, asset geometry, menu structure and
-the main window size. It cannot give us **layout** — both apps position every
-control in code, and we do not have that code.
+Static extraction could not give us layout, because both apps position every
+control in code. That gap is now closed by photography rather than disassembly:
+`docs/reference/` holds MOTU's originals running on the Mojave volume.
 
-So this is the list to capture from Mojave, by eye:
+Verified from those shots, against the live card:
 
-1. `MOTU PCI Audio Console` main window, full-size screenshot — where each of
-   the controls above sits inside the 602 × 334 content area.
-2. Every **Interface Options** pane, one per interface type (HD192, 24I/O,
-   2408mk3), since ours has three distinct ones.
-3. `MOTU Channel Names` window.
-4. CueMix FX: the console with all four interfaces attached — channel strip
-   order, how 96 inputs are paged/tabbed, the bus selector, and the
-   right-hand panel contents in the PCI variant.
-5. CueMix FX menus, and the Talkback/Listenback panel.
+- The main window is one pane, not tabs: Sample Rate / Clock Source on the left
+  of row 1–2 and Default Input / Default Output on the right, then a
+  *Configure Interface* popup with an `Audiowire: N` readout and an
+  *Enable Routing* checkbox, then one *Bank* popup per bank, then the
+  Enable Input / Enable Output checkbox grid in pairs, then the *PCI Use* line,
+  then *Interface Options…* / *Edit Channel Names…* / *Enable Volume Controls*.
+- The grid reflows per interface: HD192 shows 6 pairs in 2 columns, a 24I/O
+  shows 12 pairs in 3 columns, and the 2408mk3 shows 4 pairs under each of its
+  three bank popups.
+- The popup contents are all real card data and all reproduced by our wrapper —
+  14 clock sources, 6 sample rates, the Default In/Out channel-pair lists.
 
-Screenshots into `docs/reference/`.
+What is still uncaptured: the **HD192 Options** pane and the **24I/O Options**
+pane (we have only the 2408mk3 one), and CueMix FX's menus and Talkback panel.
+
+Still to capture from Mojave:
+
+1. **HD192 Options** pane — the one with Clip/Peak time-outs and the AES/EBU
+   controls. We have its six live selector values but not its layout.
+2. **24I/O Options** pane (Input Reference Level + Word Out Rate).
+3. CueMix FX menus, and the Talkback/Listenback panel.
+
+Already captured, in `docs/reference/`:
+
+| file | what |
+|---|---|
+| `setup-main-hd192/24io-2/24io-3/2408mk3.png` | main window, one per interface |
+| `setup-popup-*.png` | every popup's contents |
+| `setup-options-2408mk3.png` | the 2408mk3 Options pane |
+| `setup-menu-file.png` | the File menu |
+| `channel-names-top/scrolled.png` | `MOTU Channel Names` |
+| `cuemix-console-full.png` | CueMix FX, all four interfaces, PCI skin |

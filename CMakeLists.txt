@@ -41,14 +41,31 @@ set(MOTU_JUCE_FLAGS
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)
 
-# Ad-hoc sign with the audio-input entitlement. Without it the HAL plugin hands
-# back a NULL card pointer, and JUCE's own bundling step does not cover this.
+# Sign with the audio-input entitlement. Without it the HAL plugin hands back a
+# NULL card pointer, and JUCE's own bundling step does not cover this.
+#
+# Prefer a real certificate over ad-hoc: ad-hoc signing changes the cdhash on
+# every build, so TCC treats each rebuild as a new app and re-prompts for the
+# microphone. Re-run cmake after adding a certificate to pick it up.
+execute_process(
+    COMMAND security find-identity -v -p codesigning
+    OUTPUT_VARIABLE MOTU_IDENTITIES ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+string(REGEX MATCH "\"(Apple Development[^\"]*)\"" _m "${MOTU_IDENTITIES}")
+if(CMAKE_MATCH_1)
+    set(MOTU_SIGN_ID "${CMAKE_MATCH_1}")
+    message(STATUS "Code signing identity: ${MOTU_SIGN_ID}")
+else()
+    set(MOTU_SIGN_ID "-")
+    message(STATUS "Code signing identity: ad-hoc (microphone permission will "
+                   "be re-requested on every build)")
+endif()
+
 function(motu_sign target)
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND codesign -f -s - --entitlements
+        COMMAND codesign -f -s "${MOTU_SIGN_ID}" --entitlements
                 "${CMAKE_SOURCE_DIR}/tools/entitlements.plist"
                 "$<TARGET_BUNDLE_DIR:${target}>"
-        COMMENT "Ad-hoc signing ${target} with audio-input entitlement"
+        COMMENT "Signing ${target} with audio-input entitlement"
         VERBATIM)
 endfunction()
 

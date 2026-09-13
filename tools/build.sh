@@ -50,7 +50,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-codesign -f -s - --entitlements tools/entitlements.plist "$APP"
+# Signing identity: ad-hoc gives every build a fresh cdhash, so TCC sees each
+# rebuild as a new app and re-prompts for the microphone. A real certificate
+# keeps the designated requirement stable and the grant sticks. Use one if the
+# keychain has it; fall back to ad-hoc so the build never depends on it.
+IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+           | sed -n 's/.*"\(Apple Development[^"]*\)".*/\1/p' | head -1)
+if [[ -n "$IDENTITY" ]]; then
+  print "signing as: $IDENTITY"
+else
+  IDENTITY="-"
+fi
+codesign -f -s "$IDENTITY" --entitlements tools/entitlements.plist "$APP"
 print "built $APP"
 
 if (( RUN )); then

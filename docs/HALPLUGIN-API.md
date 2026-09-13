@@ -61,6 +61,12 @@ match. Setting `'rnlp'` re-points it (the plugin migrates its
 Call convention: `@convention(c) (this, MOTUException* exc, args...)`.
 The exception buffer is 144 bytes, zeroed, 8-aligned.
 
+Three of these entry points have argument semantics you cannot guess from the
+signature — `GetInputState`, `GetOutputState` and `OtherInterfaceOp`, the last
+of which takes its bool as **isGet, not isSet**, and silently writes if you get
+it backwards. All three are decoded, with the disassembly, in
+`docs/CHANNEL-STATE.md`.
+
 Verified working output on this machine (4 interfaces, all three sub-APIs live):
 
 ```

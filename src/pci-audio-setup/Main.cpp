@@ -1,16 +1,17 @@
 // MOTU PCI Audio Setup — replacement for MOTU's 2011 Carbon original.
 //
-// The original is a fixed 602 x 334 window titled "MOTU PCI Audio Console".
-// See docs/ORIGINAL-UI.md for the teardown.
+// The original is a fixed 602 x 334 window titled after the card — "PCI-424".
+// See docs/ORIGINAL-UI.md for the teardown and docs/reference/ for the shots.
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "MainComponent.h"
 
 namespace {
-// The original's window title, not its bundle name — MOTU shipped an app called
-// "MOTU PCI Audio Setup" whose window says "MOTU PCI Audio Console".
-constexpr auto kWindowTitle = "MOTU PCI Audio Console";
+// MOTU titles the window after the card, not after the app: the Mojave
+// screenshots show "PCI-424". "MOTU PCI Audio Console" is the menu-bar
+// application name. Replaced with the real device name once the card is open.
+constexpr auto kWindowTitle = "PCI-424";
 }  // namespace
 
 class PCIAudioSetupApplication : public juce::JUCEApplication {

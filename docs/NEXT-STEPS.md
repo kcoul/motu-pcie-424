@@ -1,30 +1,50 @@
 # Next steps
 
-State as of the CMake/JUCE commit.
+State after the screenshot / channel-state session.
 
-## Where we got to
+## Settled this session
 
-- `src/common/motu_card.{h,mm}` wraps the whole HAL-plugin API and is verified
-  working on Sequoia 15.7.4 with SIP enabled (`motu-dump`).
-- `MOTU PCI Audio Setup` builds under CMake + JUCE 9, ad-hoc signed with the
-  audio-input entitlement, launches, and opens a **602 × 362** window titled
-  *MOTU PCI Audio Console* — the original's exact size.
+- **Card access from inside JUCE works.** `Card::installRunLoop()` from
+  `JUCEApplication::initialise` does win the run-loop registration; the app
+  reports *Connected to PCI-424* and renders all four interfaces, their banks
+  and personalities, and the CueMix fader budget. This was last session's one
+  open question.
+- **The screenshots are MOTU's originals**, not a reimplementation: the Mojave
+  copy is i386 / 10.6 SDK / `LSRequiresCarbon`. They are in `docs/reference/`.
+- **The window is titled "PCI-424"**, after the card — not "MOTU PCI Audio
+  Console", which is the menu-bar application name. Fixed in `Main.cpp`.
+- **602 × 334 confirmed** by measuring the screenshot (602 px frame, 356 px less
+  Mojave's 22 px title bar).
+- **Layout is no longer a blocker** for PCI Audio Setup. See `ORIGINAL-UI.md`.
+- `GetInputState`, `GetOutputState` and `OtherInterfaceOp` are wrapped and
+  decoded against MOTU's own console — see `docs/CHANNEL-STATE.md`.
+- Builds now sign with a real certificate when one is in the keychain, so the
+  microphone grant survives rebuilds instead of re-prompting every launch.
 
-## Verify first, next session
+## Next
 
-**Card access from inside JUCE is not yet visually confirmed.** The app builds
-and runs, but the window was behind the terminal on display 2 and raising it
-needs Accessibility permission, which needs a terminal restart. So the one thing
-still to check is whether `MainComponent` shows *"Connected to PCI-424."* or an
-error — i.e. whether `Card::installRunLoop()` from `JUCEApplication::initialise`
-really does win the run-loop registration.
+1. **Lay out the main window for real**, from `docs/reference/setup-main-*.png`.
+   Everything it needs is now wrapped. The grid reflows per interface: 6 pairs
+   in 2 columns for the HD192, 12 in 3 for a 24I/O, 4 under each of the
+   2408mk3's three bank popups.
+2. **Interface Options panes.** `getOption`/`setOption` already say which
+   controls each interface should show. The 2408mk3 pane is captured; the HD192
+   and 24I/O panes still need a Mojave screenshot.
+3. **Edit Channel Names.** Custom names live in the per-OS prefs plist, not on
+   the card (`docs/CHANNEL-STATE.md`), so this window owns that storage. An
+   importer for the Mojave names would be worth having.
+4. **Wire up `CommitChanges` / `FlushPrefs`** — nothing persists yet. Resolve
+   the enabled-vs-active question in `CHANNEL-STATE.md` first.
+5. **Start `src/cuemix-fx/`.** `cuemix-console-full.png` gives the strip order,
+   the LCD, the right-hand PCI panel, the mix selector and the Talkback/Listen
+   cluster. Still needed: its menus and the Talkback panel.
+6. Level meters (`ReadLevelMeters`, CueMix slot 21) are still unwrapped; the
+   `AudioWireLevelMeterRequest/Results` layout is unknown.
 
-If it shows an error, the cause is almost certainly that something in JUCE's
-startup touched CoreAudio first. `motu-dump` is the known-good control:
+## Still to capture from Mojave
 
-```sh
-tools/build.sh MotuDump src/common/motu_card.mm src/common/motu_dump.mm --run
-```
+- HD192 Options pane, 24I/O Options pane.
+- CueMix FX menus and the Talkback/Listenback panel.
 
 ## Build
 
@@ -36,43 +56,36 @@ DEVELOPER_DIR=/Library/Developer/CommandLineTools cmake --build build/cmake -j8
 open "build/cmake/src/pci-audio-setup/PCIAudioSetup_artefacts/Release/MOTU PCI Audio Setup.app"
 ```
 
-`DEVELOPER_DIR` is required: Xcode 26.3 is installed but its licence is
-unaccepted, so CMake must be pointed at the Command Line Tools toolchain.
-Ninja is not installed; the Makefiles generator works.
+`DEVELOPER_DIR` is required: Xcode's licence is unaccepted, so CMake must be
+pointed at the Command Line Tools toolchain.
 
-## The Mojave capture trip
+Back-end regression check, any time the card seems wrong:
 
-Static extraction is exhausted. We have every string, every skin asset and its
-size, the menu structure and the main window size — but **not layout**, because
-both originals position every control in code. `docs/ORIGINAL-UI.md` ends with
-the shot list. Boot `/Volumes/Sierra` (mislabelled; it is Mojave 10.14.6) and
-capture into `docs/reference/`:
+```sh
+tools/build.sh MotuDump  src/common/motu_card.mm src/common/motu_dump.mm  --run
+tools/build.sh MotuProbe src/common/motu_card.mm src/common/motu_probe.mm && \
+  open build/MotuProbe.app && cat /tmp/motu-probe.txt
+```
 
-1. `MOTU PCI Audio Console` main window, full size.
-2. Each **Interface Options** pane — we have three interface types
-   (HD192, 24I/O, 2408mk3).
-3. `MOTU Channel Names` window.
-4. CueMix FX console with all four interfaces attached: strip order, how 96
-   inputs are paged, the bus selector, the PCI-variant right-hand panel.
-5. CueMix FX menus and the Talkback/Listenback panel.
+### Code signing
 
-## Then
+Ad-hoc signing gives every build a new cdhash, so TCC treats each rebuild as a
+new app and re-prompts for the microphone. `tools/build.sh` and `motu_sign()`
+now use an `Apple Development` identity if the keychain has one.
 
-- Fill in PCI Audio Setup's real layout and the remaining controls (Default
-  Input/Output, Enable Routing, Enable Volume Controls, PCI Use / AudioWire
-  meters, per-interface options, Edit Channel Names).
-- Start `src/cuemix-fx/` once the console layout is captured. It needs the
-  Legacy/PCI skin assets listed in `docs/ORIGINAL-UI.md`; check the licence
-  position before copying MOTU's PNGs into the repo, or redraw them.
-- Wire up `CommitChanges` / `FlushPrefs` — nothing currently persists changes.
-- Level meters (`CueMixAPIImpl::ReadLevelMeters`, slot 21) are mapped but not
-  yet wrapped; the struct layout of `AudioWireLevelMeterRequest/Results` is
-  still unknown.
+If `security find-identity -v -p codesigning` reports **0 valid identities**
+while an `Apple Development` cert is present, the WWDR intermediate has expired
+(the 2013 one died 2023-02-07). Install the current G3:
+
+```sh
+curl -O https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db
+```
 
 ## Open questions
 
-- `GetCueMixResourceUsage` returns three ints; the middle one (22 here) is
-  unidentified. `used` and `max` match ioreg's `CueMixFaders` / `MaxFaders`.
-- `GetPCIUsage` returns -1/-1 on this card — may be FireWire-only.
-- The exception `kind` field (0–5) maps onto MOTU's "HAL / kernel / MOTU / Unix
-  / OS / unknown error" strings, but the exact ordering is unconfirmed.
+- `enabled` 84 vs `active` 36 — see `docs/CHANNEL-STATE.md`.
+- The `+ 2` in the console's MB/sec formula.
+- `GetCueMixResourceUsage`'s middle int (22 here).
+- `GetPCIUsage` returns −1/−1 on this card; may be FireWire-only.
+- `InputLevels` bit order (only the all-zero case has been seen).
