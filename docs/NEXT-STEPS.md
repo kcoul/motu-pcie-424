@@ -124,6 +124,5 @@ security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db
 ## Open questions
 
 - The `+ 2` in the console's MB/sec formula (confirmed in MOTU's code, meaning unknown).
-- `GetCueMixResourceUsage`'s middle int (22 here).
 - `GetPCIUsage` returns −1/−1 on this card; may be FireWire-only.
 - `GetCueMixResourceUsage`'s middle int, and whether bus 0's `usage=22` is the same count.
