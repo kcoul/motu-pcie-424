@@ -3,6 +3,7 @@ juce_add_gui_app(PCIAudioSetup
     BUNDLE_ID                    "space.zenbox.motu.pci-audio-setup"
     COMPANY_NAME                 "zenbox"
     VERSION                      ${PROJECT_VERSION}
+    ICON_BIG                     "${CMAKE_SOURCE_DIR}/assets/icons/pci-audio-setup.png"
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT   "Access to the MOTU PCIe-424 audio inputs.")
 

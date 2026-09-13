@@ -3,6 +3,7 @@ juce_add_gui_app(CueMixFX
     BUNDLE_ID                    "space.zenbox.motu.cuemix-fx"
     COMPANY_NAME                 "zenbox"
     VERSION                      ${PROJECT_VERSION}
+    ICON_BIG                     "${CMAKE_SOURCE_DIR}/assets/icons/cuemix-fx.png"
     MICROPHONE_PERMISSION_ENABLED TRUE
     MICROPHONE_PERMISSION_TEXT   "Access to the MOTU PCIe-424 audio inputs.")
 
