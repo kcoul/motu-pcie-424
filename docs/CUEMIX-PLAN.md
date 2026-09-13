@@ -65,11 +65,69 @@ the FireWire/USB FX boxes.
 | App preferences | `com.motu.CueMixFX.plist` (`PeakHoldTime`, `HWFollowsConsole`, scope and OSC state, control surfaces) |
 | Configurations format | XML (AwesomeLib `XMLSerializable`); location and schema unknown |
 
-## Method: diff MOTU's app against the card
+## Method: learn the app on the M4, then map it to the PCI card
 
-PCI Audio Setup was cracked by disassembly because its symbols were intact.
-CueMix FX is stripped, so the main tool is **differential observation**: do one
-thing in MOTU's CueMix FX on Mojave and see what changed on the card.
+There are two separate things to learn, and they are best learned in different
+places.
+
+**1. What CueMix FX *is*: its parameter model and behaviour.** Study this at
+home, on the M4 Mac mini with the UltraLite mk3 Hybrid. CueMix FX runs natively
+there, and Claude Code can run alongside it: live, with signal, with a debugger
+if needed.
+
+The reason this generalises: CueMix FX keeps a hardware-independent parameter
+tree and publishes it over OSC. The TouchOSC layout it ships (`Resources/
+TouchOSC-iPad.layout_description`, also in the Mojave copy) addresses it as:
+
+```
+/bin/<mix>/<input>/{fader,pan,mute,solo,...}   per-mix strip controls
+/in/<input>/in/{trm,st,namS,...}               input trim, stereo, name
+/out/<output>/out/{fade,mute,ol,namS,...}      outputs and mix assignment
+/tb/…/{tben,lben,tbal,lbal,tbin,lbin}          talkback / listenback
+/dev/…/{mon,actv}   /meters (pre, post, rms)   device and metering
+```
+
+Many controls have a `…/str` sibling carrying the display string (e.g.
+"-6.0 dB"), which gives value laws for free. Each hardware backend
+(`CoreDeviceAW.cpp` for PCI, `CoreDeviceMacFWFX.cpp` for FireWire/USB) maps this
+same tree onto its own driver.
+
+**2. How that model reaches *this* card.** Only the PCI-424 can show this, so
+it is learned on the studio machine: the CueMixAPI slot, bus, channel and value
+behind each parameter. `MotuSpy` covers these gaps, not everything.
+
+**What does *not* transfer from the UltraLite:**
+- It uses MOTU's FireWire/USB driver, not the PCI HAL plugin, so no slot numbers
+  or encodings carry over.
+- Its mixer has DSP effects (EQ, dynamics, reverb) the PCI-424 lacks.
+- Bus and channel counts, and the right-hand panel, differ.
+
+Use it for behaviour and the parameter model; never for card-level facts.
+
+### Stage 0 — at home, on the M4 + UltraLite mk3 Hybrid
+
+1. **Inventory the binary there first.**
+   - Version, architectures, and whether it is stripped.
+   - Whether it still contains the PCI backend (`CoreDeviceAW` strings). The
+     Mojave build is one binary for every MOTU interface.
+   - If the backend is present *and* symbols survived, disassembling it could
+     answer most of stage 1 directly, and MotuSpy shrinks further.
+2. **An OSC logger.** Discover CueMix FX (Configure OSC Devices shows its host and
+   port), dump the full address tree with current values, then log every message
+   while each control is moved. Record the address, raw value, `/str` text and
+   side effects (does solo in one mix touch others?).
+3. **Meters over OSC** (`/meters`, pre/post/rms), with signal. This may give meter
+   and clip behaviour without decoding `ReadLevelMeters` first.
+4. **Behaviour that needs no card knowledge:**
+   - what the MIX and OUTPUT popups change, and how mixes relate to outputs;
+   - Talkback / Listenback flow;
+   - Copy/Paste mix;
+   - Configurations: save/export files and their XML format;
+   - the analysis windows with a test tone.
+5. **Write it up** as `docs/CUEMIX-MODEL.md`: the parameter tree, value laws and
+   behaviours, with every UltraLite-only item marked.
+
+### Then on the studio machine — MotuSpy for the PCI mapping
 
 1. **`MotuSpy` for Mojave** (built: `src/motu-spy/spy.mm`). This is `MotuDump` rebuilt with a 10.14
    deployment target (the HAL plugin there is the same 1.6 73220, and ships
@@ -78,17 +136,18 @@ thing in MOTU's CueMix FX on Mojave and see what changed on the card.
    about 6,100 `key = value` lines, into `~/Desktop/MotuSpy/NNN-label.txt` with
    a `.diff` against the previous snapshot. Two back-to-back snapshots diff
    empty, so a diff is only what you changed.
-2. **Snapshot, change one control in MOTU's CueMix FX, snapshot again, diff.**
-   That turns each UI control into "slot N, bus B, channel C, value V", and a
-   sweep of a fader or knob gives the value law.
-3. **Disassemble only where diffs can't answer**: `ReadLevelMeters` struct
-   layout, the Scope audio path, and how configurations are written. The
-   `CoreDeviceAW.cpp` assert strings anchor the PCI backend in the stripped
-   binary.
-4. **Decode the `CueMixSettings` blob** from the same diffs, since it is the
+2. **Snapshot, change one control in MOTU's CueMix FX, snapshot again, diff**,
+   now working down the `CUEMIX-MODEL.md` parameter list instead of exploring
+   blind. Each parameter becomes "slot N, bus B, channel C, value V".
+3. **Worth adding to MotuSpy: an OSC listener** pointed at CueMix FX on the same
+   Mojave boot. Then one snapshot records both sides of a change, the OSC
+   parameter and the card call, and pairs them with no guesswork.
+4. **Disassemble only where neither answers:** `ReadLevelMeters` layout, the
+   Scope audio path.
+5. **Decode the `CueMixSettings` blob** from the same diffs, since it is the
    saved form of that state.
 
-Everything decoded goes into `docs/CUEMIX-API.md`, the way `CHANNEL-STATE.md`
+Card-level findings go into `docs/CUEMIX-API.md`, the way `CHANNEL-STATE.md`
 did for Setup.
 
 ## Stages
@@ -97,11 +156,13 @@ Each stage lists its decode work first, then what gets built, then how it is
 checked.
 
 ### 1. Map the mixer model (no UI)
-- `MotuSpy` on Mojave; diff every control on one strip and on the right panel.
-- Answer: bus numbering vs "Mix N"; what OUTPUT sets; volume/trim/pan ranges and
-  dB law; what solo does across buses; balance/width and the stereo preference.
-- **Check:** a written table in which every console control has a slot,
-  arguments and an encoding.
+- **On the M4 (stage 0):** the parameter tree, value laws and behaviours, in
+  `CUEMIX-MODEL.md`.
+- **On the studio machine:** MotuSpy (and its OSC listener) maps each PCI-relevant
+  parameter to CueMixAPI calls: what "Mix N" and OUTPUT mean for bus ids,
+  volume/trim/pan encodings, solo across buses, balance/width, meters.
+- **Check:** every console control has an OSC address, a slot with arguments,
+  and an encoding.
 
 ### 2. A plain working mixer
 - A JUCE window with one strip per active input, bound to the card: trim,
