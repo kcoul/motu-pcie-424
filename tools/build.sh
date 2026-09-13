@@ -30,7 +30,11 @@ APP="build/$NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 
-$CXX -isysroot "$SDK" -std=c++17 -ObjC++ -O2 -Wall \
+# MACOSX_DEPLOYMENT_TARGET=10.14 builds something the Mojave volume can run
+# (MotuSpy). The default is this machine's own version.
+MINVER=${MACOSX_DEPLOYMENT_TARGET:-$(sw_vers -productVersion | cut -d. -f1-2)}
+
+$CXX -isysroot "$SDK" -mmacosx-version-min=$MINVER -arch x86_64 -std=c++17 -ObjC++ -O2 -Wall \
      -Isrc/common \
      -o "$APP/Contents/MacOS/$NAME" "${SRCS[@]}" \
      -framework Cocoa -framework CoreAudio -framework CoreFoundation
@@ -47,6 +51,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleVersion</key><string>1.0</string>
 <key>NSMicrophoneUsageDescription</key><string>Access to the MOTU PCIe-424 audio inputs</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
+<key>LSMinimumSystemVersion</key><string>$MINVER</string>
 </dict></plist>
 PLIST
 

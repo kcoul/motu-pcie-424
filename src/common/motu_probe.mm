@@ -44,21 +44,21 @@ static void probe() {
     P("  numOutputs %d   numActiveOutputs %d\n", nOut, card.numActiveOutputs(e));
 
     P("\n== every channel, both directions ==\n");
-    P("  id   in.enabled in.avail  out.enabled out.source   description\n");
+    P("  id   in.exists in.enabled  out.exists out.source   description\n");
     int inEnabled = 0, outEnabled = 0, inAvail = 0;
     for (int id = 0; id < nIn; ++id) {
         motu::Exception ei, eo;
         auto in  = card.inputState(ei, id);
         auto out = card.outputState(eo, id);
         if (in.enabled)  ++inEnabled;
-        if (in.active) ++inAvail;
-        if (out.enabled) ++outEnabled;
+        if (in.exists)   ++inAvail;
+        if (out.enabled()) ++outEnabled;
         P("  %3d      %3u      %3u        %3u     %6d   %s%s%s\n",
-          id, in.enabled, in.active, out.enabled, out.source,
+          id, in.exists, in.enabled, out.exists, out.source,
           card.inputDescription(e, id).c_str(),
           ei.raised() ? "  IN-EXC " : "", eo.raised() ? "  OUT-EXC " : "");
     }
-    P("\n  totals: in.enabled=%d  in.available=%d  out.enabled=%d\n",
+    P("\n  totals: in.enabled=%d  in.exists=%d  out.enabled=%d\n",
       inEnabled, inAvail, outEnabled);
     P("  MOTU console at screenshot time read: Ins enabled 60, Outs enabled 60\n");
 

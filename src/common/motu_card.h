@@ -101,6 +101,13 @@ public:
     void setBusMute(Exception&, int bus, bool);
     void setBusVolume(Exception&, int bus, int);
 
+    // Stereo input balance/width (slots 24-31). Balance and width are bytes;
+    // the preference picks which knob the PAN control drives (BAL / WIDTH).
+    int  inputBalance(Exception&, int bus, int ch) const;
+    int  inputWidth(Exception&, int bus, int ch) const;
+    int  inputBalanceWidthPref(Exception&, int bus, int ch) const;
+    int  inputChannelMapping(Exception&, int ch) const;
+
     // Fader budget. `used` and `max` line up with the driver's CueMixFaders and
     // MaxFaders in ioreg; the middle value is unidentified (observed 22 on a
     // 4-interface / 36-active-input rig).
@@ -194,6 +201,7 @@ public:
     std::string nthBankPersonality(Exception&, int bank, int n) const;
     int         personalityForBank(Exception&, int bank) const;
     void        setPersonalityForBank(Exception&, int bank, int personality);
+    // `ch` is relative to the wire (0-23), not a card-wide id.
     bool        inputChannelAvailable(Exception&, int ch) const;
     bool        outputChannelAvailable(Exception&, int ch) const;
 
@@ -249,9 +257,17 @@ public:
     explicit operator bool() const { return p_ != nullptr; }
     void* raw() const { return p_; }
 
+    // Bit `selector` (0-3) of the card's feature flags. 0 = output cells can be
+    // routed from an input (source popups); 0 on a PCI-424.
     int         gestalt(Exception&, int selector) const;
     void        commitChanges(Exception&, bool);
     void        flushPrefs(Exception&);
+
+    // File > Save / Load Configuration. The configuration is the driver's
+    // "Configuration" registry property, saved as an XML plist (.mcfg).
+    // Load = SetConfiguration + CommitChanges(true), exactly as MOTU's console.
+    std::vector<unsigned char> saveConfiguration(Exception&) const;
+    bool                       loadConfiguration(Exception&, const std::vector<unsigned char>& xml);
     void        probeForInterfaces(Exception&);
 
     int         numWires(Exception&) const;
@@ -265,19 +281,15 @@ public:
     std::string inputDescription(Exception&, int id) const;
     void        setInputEnable(Exception&, int id, bool);
 
-    // GetInputState hands back two bytes, decoded by probing against MOTU's own
-    // console (docs/CHANNEL-STATE.md):
+    // GetInputState hands back two bytes. Their meaning was pinned by
+    // disassembling MOTU's own console (docs/CHANNEL-STATE.md):
     //
-    //   enabled  the "Enable Input" checkbox in PCI Audio Setup's grid, and the
-    //            number the console's "PCI Use: Ins enabled N" line counts.
-    //            0 for ids that no interface populates (an HD192 occupies only
-    //            12 of its 24 id slots), so it also tells you a channel exists.
-    //   active   the channel is in the driver's current stream configuration.
-    //            The total equals numActiveInputs() exactly.
-    //
-    // These two disagree on this rig (84 enabled, 36 active) — see the open
-    // question in docs/CHANNEL-STATE.md before treating either as the other.
-    struct InputState { unsigned char enabled = 0, active = 0; };
+    //   exists   the channel is populated. 0 for the ids an interface does not
+    //            fill (an HD192 occupies only 12 of its 24 id slots).
+    //   enabled  the "Enable Input" checkbox. The driver stores it per *pair*,
+    //            and its total equals numActiveInputs(), which is also what the
+    //            console's "PCI Use: Ins enabled N" line prints.
+    struct InputState { unsigned char exists = 0, enabled = 0; };
     InputState  inputState(Exception&, int id) const;
 
     int         numOutputs(Exception&) const;
@@ -287,10 +299,15 @@ public:
     void        setOutputSource(Exception&, int id, int source);
 
     // GetOutputState: one byte plus an int. The byte parallels
-    // InputState::enabled. The int is the routing source setOutputSource
-    // writes; observed -1 on every active channel here and -2 on every inactive
-    // one, i.e. nothing is explicitly routed on this rig.
-    struct OutputState { unsigned char enabled = 0; int source = -1; };
+    // InputState::exists. The int is the channel's source: -1 plays the
+    // computer's output (the "Enable Output" checkbox), -2 is disabled, and
+    // >= 0 routes an input id there (cards whose gestalt allows routing).
+    struct OutputState {
+        unsigned char exists = 0;
+        int source = -2;
+        bool enabled() const { return source == -1; }
+    };
+    static constexpr int kOutputEnabled = -1, kOutputDisabled = -2;
     OutputState outputState(Exception&, int id) const;
 
     int         bankRelativeID(Exception&, int id) const;
@@ -325,6 +342,33 @@ UInt32                   clockSource(AudioDeviceID);
 bool                     setClockSource(AudioDeviceID, UInt32);
 std::vector<UInt32>      clockSources(AudioDeviceID);
 std::string              clockSourceName(AudioDeviceID, UInt32);
+
+// Channels as CoreAudio numbers them: 1-based, active channels only, in stream
+// order. These are what Default Input / Default Output list and select.
+int         channelCount(AudioDeviceID, bool isInput);
+std::string channelName(AudioDeviceID, bool isInput, int channel);
+// 'lccn' / 'lcnn': "HD192:Analog-A" + "1", or a custom name + "". MOTU's
+// Default Input/Output labels are built from these two, not from channelName.
+std::string channelCategory(AudioDeviceID, bool isInput, int channel);
+std::string channelNumber(AudioDeviceID, bool isInput, int channel);
+// From the first output stream's physical format; 0 if unavailable.
+int         bytesPerSample(AudioDeviceID);
+bool        preferredStereo(AudioDeviceID, bool isInput, UInt32& left, UInt32& right);
+bool        setPreferredStereo(AudioDeviceID, bool isInput, UInt32 left, UInt32 right);
+
+std::string deviceUID(AudioDeviceID);
+
+// Calls `fn` on the main queue when any of `selectors` changes, in either
+// scope. Returns a token for removeListener.
+struct Listener;
+Listener* addListener(AudioDeviceID, const std::vector<AudioObjectPropertySelector>& selectors,
+                      void (^fn)(void));
+void removeListener(Listener*);
+
+// MOTU's private device properties ('Mvol' and friends) are plain UInt32s.
+// Returns false if the device does not have the property.
+bool uint32Property(AudioDeviceID, AudioObjectPropertySelector, AudioObjectPropertyScope, UInt32& value);
+bool setUint32Property(AudioDeviceID, AudioObjectPropertySelector, AudioObjectPropertyScope, UInt32 value);
 
 }  // namespace device
 }  // namespace motu

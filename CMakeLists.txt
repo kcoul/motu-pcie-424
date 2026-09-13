@@ -18,7 +18,7 @@ add_subdirectory(third_party/JUCE)
 
 # Shared card access. Deliberately independent of JUCE so it stays testable on
 # its own (see src/common/motu_dump.mm, built by tools/build.sh).
-add_library(motu_card STATIC src/common/motu_card.mm)
+add_library(motu_card STATIC src/common/motu_card.mm src/common/motu_prefs.mm)
 target_include_directories(motu_card PUBLIC src/common)
 target_link_libraries(motu_card PUBLIC
     "-framework CoreAudio"

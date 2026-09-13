@@ -56,8 +56,8 @@ Faithful separate replicas of MOTU's originals, not a merged tool.
 
 | App | Framework | Status |
 |---|---|---|
-| CueMix FX | JUCE | not started |
-| MOTU PCI Audio Setup | JUCE | not started |
+| CueMix FX | JUCE | planned in stages: `docs/CUEMIX-PLAN.md` |
+| MOTU PCI Audio Setup | JUCE | every control wired and stress-tested; not yet in daily use |
 | MOTU PCI SMPTE Setup | — | shelved, unused |
 
 C++ and JUCE for both. Neither original used a stock control, so there is no
@@ -74,8 +74,12 @@ first the card pointer stays NULL forever.
 
 ```
 docs/    HALPLUGIN-API.md  API map + how to reach it
-         ORIGINAL-UI.md    what MOTU's apps are, and what to capture from Mojave
-src/common/               shared card access (motu_card.h/.mm) + motu-dump
+         CHANNEL-STATE.md  channel state, options, commit semantics (from MOTU's own console)
+         ORIGINAL-UI.md    what MOTU's apps are, and what was captured from Mojave
+         CUEMIX-PLAN.md    CueMix FX, stage by stage
+         reference/        screenshots of MOTU's originals running on Mojave
+src/common/               shared card access (motu_card.h/.mm), prefs reader, motu-dump/probe
+src/motu-spy/             MotuSpy (runs on Mojave: snapshot + diff card state) and bounds probe
 src/cuemix-fx/            JUCE app
 src/pci-audio-setup/      JUCE app
 third_party/JUCE          submodule, kcoul/JUCE

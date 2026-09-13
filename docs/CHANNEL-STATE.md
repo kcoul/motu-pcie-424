@@ -8,47 +8,64 @@ control position that MOTU's app displays.
 ## GetInputState / GetOutputState  (slots 20 and 26)
 
 ```
-GetInputState (MOTUException*, int id, unsigned char* enabled, unsigned char* active)
-GetOutputState(MOTUException*, int id, unsigned char* enabled, int* source)
+GetInputState (MOTUException*, int id, unsigned char* exists, unsigned char* enabled)
+GetOutputState(MOTUException*, int id, unsigned char* exists, int* source)
 ```
 
-Wrapped as `Card::inputState()` / `Card::outputState()`.
+Wrapped as `Card::inputState()` / `Card::outputState()`. **Pinned by
+disassembling MOTU's original console** (i386, symbols intact), which reads the
+checkbox from the *second* input byte (`0xb3c9` area) and from `source == -1`.
 
 | field | meaning | this rig |
 |---|---|---|
-| `enabled` | the **Enable Input / Enable Output** checkbox in the console's grid | 84 of 96 |
-| `active` | channel is in the driver's current stream configuration | 36 |
-| `source` | routing source `setOutputSource` writes | −1 active, −2 inactive |
+| `exists` | the channel is populated (0 for the half of an HD192's 24-id slot it does not fill) | 84 of 96 |
+| `enabled` | the **Enable Input** checkbox; stored per pair in the driver | 36 |
+| `source` | −1 = **Enable Output** checked, −2 = unchecked, ≥ 0 = routed from that input id | −1 / −2 |
 
-`active` totals **exactly** `numActiveInputs()`, which is how it was identified.
+`enabled` totals exactly `numActiveInputs()`, and the console's
+**"PCI Use: Ins enabled N, Outs enabled N"** prints `GetNumActiveInputs` /
+`GetNumActiveOutputs` directly.
 
-`enabled` is 0 only for ids 12–23 — the half of the HD192's 24-id slot that a
-12-channel HD192 does not populate — so it doubles as "this channel exists".
-96 ids − 12 unpopulated = 84.
+> An earlier revision had the two input bytes the other way round, supported by
+> "84 − the 2408mk3's 24 ids = the screenshots' 60". That was a coincidence: the
+> Mojave card simply had 60 channels enabled.
 
-### Cross-check against the console
+### Changing channels
 
-`docs/reference/setup-main-*.png` read **"PCI Use: Ins enabled 60, Outs enabled
-60"** with the 2408mk3's grid fully unchecked. The 2408mk3 owns 24 ids, and
-84 − 24 = **60**. That is the arithmetic that identifies `enabled` as the
-checkbox, and it is why the two counts must never be conflated.
+MOTU's console, per click (`AWConfigPane::PaneChanged`, `UpdateInputPair`,
+`UpdateOutputPair`):
 
-The same line's "Aprx 15.39 MB per sec" is reproduced exactly by
+1. `SetInputEnable(id, on)`, or `SetOutputSource(id, on ? -1 : -2)`.
+2. The same for the pair's partner (id+1 for an even id, id−1 for an odd one).
+3. `CommitChanges(true)`.
+
+`CommitChanges(sync)` (HAL `0x7710`) sends the pending dictionary to the driver
+under `"Set"`, or under `"Config"` with `BoostPriority` for structural changes.
+With `sync` it waits up to **5 s** in run-loop mode
+`com_motu_driver_PCIAudio_PlugIn_RunLoopMode` for the acknowledgement, then
+`QueueSavePrefs()`. It is a no-op when nothing is pending. The console's wrapper
+always passes `true` and **never calls `FlushPrefs`**.
+
+Bank personality is `SetPersonalityForBank(bank, n)` then commit. Options panes
+GET, modify, SET, commit. Sample rate, clock source and Default In/Out are plain
+CoreAudio properties (`nsrt`, `csrc`, `dch2`).
+
+### PCI Use
+
+MOTU's format string (`.rsrc` STR# index 13):
 
 ```
-(ins + outs + 2) * rate * 3 bytes / 1 MiB
-  = (60 + 60 + 2) * 44100 * 3 / 1048576 = 15.393
+PCI Use: Ins enabled %ld, Outs enabled %ld, Aprx %.2f MB per sec.
+MB = (ins + outs ? ins + outs + 2 : 0) * rate * bytesPerSample / 2^20
 ```
 
-The `+ 2` is unexplained — one data point, so this is a fit, not a proof.
+`bytesPerSample` = `mBytesPerFrame / mChannelsPerFrame` of the output stream's
+physical format: 3 on this card, on Mojave and on Sequoia.
 
-### Open question
+### Channel ids
 
-`enabled` is 84 but `active` is 36 on this rig, and a 24-channel 24I/O bank
-reports only 8 active. The likely explanation is that `enabled` is the desired
-configuration and `active` is what the driver has actually committed, i.e. the
-gap is what `CommitChanges` exists to close. Not yet confirmed — do not wire a
-commit button to this until it is.
+`id = wire * 24 + channel within the wire`. Banks are contiguous: bank *b*
+starts at the sum of `GetNumberOfChansInBank` for the banks before it.
 
 ## OtherInterfaceOp  (Interface slot 5) — the Options panes
 
@@ -73,12 +90,12 @@ Selectors come from the jump table at `0x9884` (9 int32 offsets):
 | sel | key | control |
 |---|---|---|
 | 0 | `AnalogMirror` | 2408mk3 "Bank to mirror on Analog" |
-| 1 | `AESOutputSRCMode` | HD192 Mirror Analog (by elimination, below) |
-| 2 | `AESInputSteal` | HD192 "Steal Inputs" |
-| 3 | `AESOutputClock` | HD192 AES/EBU Output Clock |
-| 4 | `AESInputSRC` | HD192 AES/EBU input rate convert |
-| 5 | `PeakHoldTime` | HD192 meter time-out (Clip/Peak may be crossed) |
-| 6 | `ClipHoldTime` | HD192 meter time-out |
+| 1 | `AESOutputSRCMode` | HD192 **Mirror Analog** (the key name is misleading) |
+| 2 | `AESInputSteal` | HD192 Steal Inputs |
+| 3 | `AESOutputClock` | HD192 Output Clock + Fixed Frequency |
+| 4 | `AESInputSRC` | HD192 AES/EBU input Rate Convert |
+| 5 | `PeakHoldTime` | HD192 **Clip** Time-out (crossed) |
+| 6 | `ClipHoldTime` | HD192 **Peak/Hold** Time-out (crossed) |
 | 7 | `InputLevels` | input reference level, +4 dBu / −10 dBV |
 | 8 | `WordOutRange` | word out rate |
 
@@ -99,43 +116,38 @@ shows Bank-to-mirror, Input Reference Level and Word Out Rate, and nothing else.
 Its three live values agree too: `AnalogMirror=0` = "Bank A", `WordOutRange=0` =
 "Match system clock", `InputLevels=0` = all pairs +4 dBu.
 
-`InputLevels` is a bitfield with **set = −10 dBV**. That is now confirmed: the
-Mojave `24IO Options` pane shows all three groups at −10 dBV, and the Mojave
-prefs hold `InputLevels = 7` for both 24I/Os. There is one bit per radio row,
-so 4 bits (pairs `1-2`…`7-8`) on the 2408mk3 and **3 bits (`1-8`, `9-16`,
-`17-24`) on a 24I/O**. Only all-clear and all-set have been seen, so the bit
-order is still unverified.
+`InputLevels` is a bitfield with **set = −10 dBV**, **bit n = row n** (least
+significant bit = the first row). One bit per radio row: 4 bits (pairs
+`1-2`…`7-8`) on the 2408mk3, 3 bits (`1-8`, `9-16`, `17-24`) on a 24I/O. The
+Mojave prefs hold `InputLevels = 7` for both 24I/Os, which is the all −10 dBV
+pane in `setup-options-24io.png`.
 
-### The HD192 pane, key by key
+### Encodings, from MOTU's pane code
 
-`setup-options-hd192.png` has exactly six controls for the six selectors:
+All confirmed by disassembly, and reproduced exactly by our HD192 pane against
+`setup-options-hd192.png`:
 
-| control | key | Mojave pane | prefs value |
-|---|---|---|---|
-| Steal Inputs `[None]` | `AESInputSteal` | None | 0 |
-| Rate Convert checkbox (AES/EBU *input*) | `AESInputSRC` | off | 0 |
-| Mirror Analog `[Out 1-2]` (AES/EBU *output*) | `AESOutputSRCMode`? | Out 1-2 | 0 |
-| Output Clock `[System]` | `AESOutputClock` | System | 0 |
-| Clip Time-out | `ClipHoldTime`? | 1 Minute | 1 |
-| Peak/Hold Time-out | `PeakHoldTime`? | 2 Seconds | 4 |
+| control | selector | values |
+|---|---|---|
+| Steal Inputs | 2 | 0 None, 1 In 1-2 … 6 In 11-12 |
+| Rate Convert | 4 | 0 / 1 |
+| Mirror Analog | 1 | 0–5 Out 1-2 … Out 11-12; 8–13 In 1-2 … In 11-12 (6, 7 unused) |
+| Output Clock | 3 | 0 System, 1 AES Input, 2 AES Word In; 44.1 / 48 / 88.2 / 96 kHz = 3–6 with Fixed Frequency, 7–10 without |
+| Clip Time-out | **5** | 0 No Delay, 1 2 s, 2 4 s, 3 10 s, 4 1 min, 5 5 min, 6 8 min, 7 Infinite |
+| Peak/Hold Time-out | **6** | same list |
+| Bank to mirror on Analog | 0 | 0 Bank A, 1 B, 2 C |
+| Word Out Rate | 8 | 0 Match system clock, 1 44.1/48, 2 88.2/96 |
 
-Two rows are uncertain:
+The Mojave values (`PeakHoldTime = 4`, `ClipHoldTime = 1`) show as Clip
+*1 Minute* and Peak/Hold *2 Seconds*, which is what proves the crossing.
 
-- **`AESOutputSRCMode` → Mirror Analog** is assigned only by elimination. The
-  pane has no output rate-convert control, so the name does not describe what
-  the console shows. It is the only HD192 key left over.
-- **Clip vs Peak/Hold may be crossed.** CueMix FX's Peak Hold Time list is
-  `Off, 2 s, 4 s, 10 s, 1 min, 5 min, Infinite`. On that scale
-  `PeakHoldTime = 4` is *1 Minute* and `ClipHoldTime = 1` is *2 Seconds*, which
-  is exactly the pane with the two rows swapped. Either the jump-table names are
-  crossed, or the HD192 popups use their own list. One screenshot of either
-  popup's contents settles it. Until then, do not wire these two by name.
+MOTU's own write path for Word Out Rate and Bank to mirror passes the 1-based
+popup item without subtracting 1 (`0x173b2`, `0x1781a`), which looks like a bug
+in the original. We write the value the GET path displays.
 
-**ADAT Mode Type I / Type II** is *not* an OtherInterfaceOp selector. Type II is
-S/MUX, so it is the card-level `GetSMUXOptionSetting` / `SetSMUXOptionSetting`.
-
-**ADAT Mode Type I / Type II** is *not* an OtherInterfaceOp selector. Type II is
-S/MUX, so it is the card-level `GetSMUXOptionSetting` / `SetSMUXOptionSetting`.
+**ADAT Mode** on the 2408mk3 is the card-level `SMUXOptionSetting`, inverted:
+non-zero shows **Type I**, zero shows **Type II** (both volumes store
+`SMUXOptionEnable = 0`, and Mojave shows Type II).
 
 ## Custom channel names are not on the card
 
@@ -172,9 +184,7 @@ the console's grid, which is drawn in pairs (`1-2`, `3-4`, …). The Mojave copy
 has **30 of 48 set = 60 channels**, which is the `Ins enabled 60` the
 screenshots show, independently of the `GetInputState` decode above.
 
-Sequoia's copy has 19 set while the live API reports 84 enabled, so the plist is
-the last *saved* state, not the live one — more evidence that the
-enabled-vs-active gap is about what has been committed.
+Sequoia's copy has 19 pairs set; the live card has 36 channels enabled.
 
 ### Interface options *are* in the prefs, per OS
 

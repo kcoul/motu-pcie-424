@@ -8,7 +8,9 @@ juce_add_gui_app(PCIAudioSetup
 
 target_sources(PCIAudioSetup PRIVATE
     Main.cpp
-    MainComponent.cpp)
+    MacLookAndFeel.cpp
+    MainComponent.cpp
+    OptionsWindow.cpp)
 
 target_compile_definitions(PCIAudioSetup PRIVATE
     JUCE_WEB_BROWSER=0

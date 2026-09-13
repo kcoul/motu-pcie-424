@@ -1,55 +1,45 @@
 # Next steps
 
-State after the screenshot / channel-state session.
+State after the 2026-09-12 PCI Audio Setup session.
 
-## Settled this session
+## Settled
 
-- **Card access from inside JUCE works.** `Card::installRunLoop()` from
-  `JUCEApplication::initialise` does win the run-loop registration; the app
-  reports *Connected to PCI-424* and renders all four interfaces, their banks
-  and personalities, and the CueMix fader budget. This was last session's one
-  open question.
-- **The screenshots are MOTU's originals**, not a reimplementation: the Mojave
-  copy is i386 / 10.6 SDK / `LSRequiresCarbon`. They are in `docs/reference/`.
-- **The window is titled "PCI-424"**, after the card — not "MOTU PCI Audio
-  Console", which is the menu-bar application name. Fixed in `Main.cpp`.
-- **602 × 334 confirmed** by measuring the screenshot (602 px frame, 356 px less
-  Mojave's 22 px title bar).
-- **Layout is no longer a blocker** for PCI Audio Setup. See `ORIGINAL-UI.md`.
-- `GetInputState`, `GetOutputState` and `OtherInterfaceOp` are wrapped and
-  decoded against MOTU's own console — see `docs/CHANNEL-STATE.md`.
-- Builds now sign with a real certificate when one is in the keychain, so the
-  microphone grant survives rebuilds instead of re-prompting every launch.
+- **PCI Audio Setup is functionally complete** and survived a stress test.
+  Every write follows the call sequence recovered by disassembling MOTU's own
+  console (symbols intact): `docs/CHANNEL-STATE.md`.
+  - Channel checkboxes, Bank personalities, Enable Routing (and its "Disable"
+    bank item), Enable Volume Controls (`'Mvol'`), Default In/Out.
+  - All three Options panes, with MOTU's value lists.
+  - Save/Load Configuration (`.mcfg`), Refresh (re-probe), live refresh.
+- **Corrections to earlier sessions:**
+  - `GetInputState`'s bytes are `exists, enabled` (not the other way round).
+  - Output enable is `source == -1`.
+  - The HD192 Clip and Peak/Hold keys are crossed.
+  - Interface options live in the per-OS prefs.
+- **Hazards found:**
+  - A commit can make the driver rebuild its Interface objects, so never cache
+    one.
+  - The CueMix balance/width/mapping getters do no bounds checking and
+    segfault past the end.
+- **CueMix buses are output pairs** (48, numbered 0, 2, … 94).
+- **MotuSpy** is on the Mojave Desktop for differential reverse-engineering.
 
 ## Next
 
-1. **Lay out the main window for real**, from `docs/reference/setup-main-*.png`.
-   Everything it needs is now wrapped. The grid reflows per interface: 6 pairs
-   in 2 columns for the HD192, 12 in 3 for a 24I/O, 4 under each of the
-   2408mk3's three bank popups.
-2. **Interface Options panes.** All three panes are captured, and
-   `getOption`/`setOption` already say which controls each one shows. Two HD192
-   rows are unresolved: Mirror Analog is mapped by elimination, and Clip vs
-   Peak/Hold may be crossed (`CHANNEL-STATE.md`). The values live in the per-OS
-   prefs at `Interfaces[n].DeviceSpecific`, not on the card.
-3. **Edit Channel Names.** Custom names live in the per-OS prefs plist, not on
-   the card (`docs/CHANNEL-STATE.md`), so this window owns that storage. An
-   importer for the Mojave names would be worth having.
-4. **Wire up `CommitChanges` / `FlushPrefs`** — nothing persists yet. Resolve
-   the enabled-vs-active question in `CHANNEL-STATE.md` first.
-5. **Start `src/cuemix-fx/`.** Fully captured: the console, every menu, the
-   Talkback/Listenback sheet, the configuration and control-surface dialogs,
-   and the five Devices-menu analysis windows (`ORIGINAL-UI.md`). Phones is
-   genuinely empty on PCI. Peak Hold Time's list is recovered from the strings
-   file.
-6. Level meters (`ReadLevelMeters`, CueMix slot 21) are still unwrapped; the
-   `AudioWireLevelMeterRequest/Results` layout is unknown.
+1. **CueMix stage 1 on Mojave with MotuSpy** (`docs/CUEMIX-PLAN.md`). Pass
+   signal through channels so meters and clip LEDs show up too; that needs
+   `ReadLevelMeters` decoded, which snapshots can't do alone.
+2. **Edit Channel Names window.** MOTU's helper is i386. `motu_prefs.mm` can
+   already read another volume's names (UTF-16 blobs); the window and the
+   `setChannelName` + commit write path are not built yet.
+3. **Put PCI Audio Setup into daily use**, then install it into `/Applications`
+   once trusted.
+4. Classic vs modern skins, once features are done.
+5. Tidy `ORIGINAL-UI.md` against the corrections above.
 
 ## Still to capture from Mojave
 
-- Only the **HD192 Options popup lists** (Clip Time-out, Peak/Hold Time-out,
-  Steal Inputs, Mirror Analog, Output Clock). They settle the two uncertain key
-  mappings.
+- CueMix FX behaviour, via MotuSpy (stage 1).
 
 ## Build
 
@@ -102,8 +92,7 @@ security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db
 
 ## Open questions
 
-- `enabled` 84 vs `active` 36 — see `docs/CHANNEL-STATE.md`.
-- The `+ 2` in the console's MB/sec formula.
+- The `+ 2` in the console's MB/sec formula (confirmed in MOTU's code, meaning unknown).
 - `GetCueMixResourceUsage`'s middle int (22 here).
 - `GetPCIUsage` returns −1/−1 on this card; may be FireWire-only.
-- `InputLevels` bit order (only the all-zero case has been seen).
+- `GetCueMixResourceUsage`'s middle int, and whether bus 0's `usage=22` is the same count.

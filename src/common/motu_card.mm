@@ -1,5 +1,8 @@
 #include "motu_card.h"
 
+#include <Block.h>
+#include <dispatch/dispatch.h>
+
 #include <cstdio>
 #include <cstring>
 
@@ -117,6 +120,11 @@ void CueMix::setVolume(Exception& e, int bus, int ch, int v) { e.reset(); fn<F_v
 void CueMix::setPan(Exception& e, int bus, int ch, int v)    { e.reset(); fn<F_v_iii>(p_, 18)(p_, e.raw, bus, ch, v); }
 void CueMix::setBusMute(Exception& e, int bus, bool v)       { e.reset(); fn<F_v_ib>(p_, 19)(p_, e.raw, bus, v); }
 void CueMix::setBusVolume(Exception& e, int bus, int v)      { e.reset(); fn<F_v_ii>(p_, 20)(p_, e.raw, bus, v); }
+
+int CueMix::inputBalance(Exception& e, int bus, int ch) const          { e.reset(); return fn<F_i_ii>(p_, 28)(p_, e.raw, bus, ch); }
+int CueMix::inputWidth(Exception& e, int bus, int ch) const            { e.reset(); return fn<F_i_ii>(p_, 29)(p_, e.raw, bus, ch); }
+int CueMix::inputBalanceWidthPref(Exception& e, int bus, int ch) const { e.reset(); return fn<F_i_ii>(p_, 30)(p_, e.raw, bus, ch); }
+int CueMix::inputChannelMapping(Exception& e, int ch) const            { e.reset(); return fn<F_i_i>(p_, 31)(p_, e.raw, ch); }
 
 CueMix::Resources CueMix::resources(Exception& e) const {
     Resources r; e.reset();
@@ -320,6 +328,34 @@ Card Card::open(AudioDeviceID dev, std::string* err, double timeoutSeconds) {
 int  Card::gestalt(Exception& e, int sel) const { e.reset(); return fn<F_i_i>(p_, 4)(p_, e.raw, sel); }
 void Card::commitChanges(Exception& e, bool v)  { e.reset(); fn<F_v_b>(p_, 3)(p_, e.raw, v); }
 void Card::flushPrefs(Exception& e)             { e.reset(); fn<F_void>(p_, 10)(p_, e.raw); }
+std::vector<unsigned char> Card::saveConfiguration(Exception& e) const {
+    e.reset();
+    auto cfg = (CFPropertyListRef)fn<F_ptr>(p_, 8)(p_, e.raw);   // +1 retained
+    if (!cfg) return {};
+    std::vector<unsigned char> out;
+    if (CFDataRef xml = CFPropertyListCreateData(kCFAllocatorDefault, cfg, kCFPropertyListXMLFormat_v1_0, 0, nullptr)) {
+        out.assign(CFDataGetBytePtr(xml), CFDataGetBytePtr(xml) + CFDataGetLength(xml));
+        CFRelease(xml);
+    }
+    CFRelease(cfg);
+    return out;
+}
+
+bool Card::loadConfiguration(Exception& e, const std::vector<unsigned char>& xml) {
+    e.reset();
+    CFDataRef data = CFDataCreate(kCFAllocatorDefault, xml.data(), (CFIndex)xml.size());
+    if (!data) return false;
+    CFPropertyListRef cfg = CFPropertyListCreateWithData(kCFAllocatorDefault, data, kCFPropertyListImmutable,
+                                                         nullptr, nullptr);
+    CFRelease(data);
+    if (!cfg) return false;
+    ((void (*)(void*, void*, CFPropertyListRef))slot(p_, 9))(p_, e.raw, cfg);   // retains
+    CFRelease(cfg);
+    if (e.raised()) return false;
+    commitChanges(e, true);
+    return !e.raised();
+}
+
 void Card::probeForInterfaces(Exception& e)     { e.reset(); fn<F_void>(p_, 15)(p_, e.raw); }
 
 int  Card::numWires(Exception& e) const { e.reset(); return fn<F_int>(p_, 11)(p_, e.raw); }
@@ -340,7 +376,7 @@ void Card::setInputEnable(Exception& e, int id, bool v) { e.reset(); fn<F_v_ib>(
 Card::InputState Card::inputState(Exception& e, int id) const {
     InputState st;
     e.reset();
-    fn<F_instate>(p_, 20)(p_, e.raw, id, &st.enabled, &st.active);
+    fn<F_instate>(p_, 20)(p_, e.raw, id, &st.exists, &st.enabled);
     return st;
 }
 
@@ -353,7 +389,7 @@ void Card::setOutputSource(Exception& e, int id, int src) { e.reset(); fn<F_v_ii
 Card::OutputState Card::outputState(Exception& e, int id) const {
     OutputState st;
     e.reset();
-    fn<F_outstate>(p_, 26)(p_, e.raw, id, &st.enabled, &st.source);
+    fn<F_outstate>(p_, 26)(p_, e.raw, id, &st.exists, &st.source);
     return st;
 }
 
@@ -467,6 +503,147 @@ std::string clockSourceName(AudioDeviceID d, UInt32 id) {
     CFStringGetCString(nm, b, sizeof b, kCFStringEncodingUTF8);
     CFRelease(nm);
     return b;
+}
+
+namespace {
+AudioObjectPropertyScope scopeOf(bool isInput) {
+    return isInput ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput;
+}
+
+std::string toUtf8(CFStringRef s) {
+    if (!s) return {};
+    char b[512] = {0};
+    CFStringGetCString(s, b, sizeof b, kCFStringEncodingUTF8);
+    return b;
+}
+}  // namespace
+
+int channelCount(AudioDeviceID d, bool isInput) {
+    AudioObjectPropertyAddress a = { kAudioDevicePropertyStreamConfiguration, scopeOf(isInput),
+                                     kAudioObjectPropertyElementMain };
+    UInt32 sz = 0;
+    if (AudioObjectGetPropertyDataSize(d, &a, 0, nullptr, &sz) != noErr || !sz) return 0;
+    std::vector<unsigned char> buf(sz);
+    if (AudioObjectGetPropertyData(d, &a, 0, nullptr, &sz, buf.data()) != noErr) return 0;
+    const auto* list = (const AudioBufferList*)buf.data();
+    int n = 0;
+    for (UInt32 i = 0; i < list->mNumberBuffers; ++i) n += (int)list->mBuffers[i].mNumberChannels;
+    return n;
+}
+
+std::string channelName(AudioDeviceID d, bool isInput, int channel) {
+    AudioObjectPropertyAddress a = { kAudioObjectPropertyElementName, scopeOf(isInput), (UInt32)channel };
+    CFStringRef nm = nullptr; UInt32 sz = sizeof nm;
+    if (AudioObjectGetPropertyData(d, &a, 0, nullptr, &sz, &nm) != noErr || !nm) return {};
+    std::string s = toUtf8(nm);
+    CFRelease(nm);
+    return s;
+}
+
+namespace {
+std::string elementString(AudioDeviceID d, AudioObjectPropertySelector sel, bool isInput, int channel) {
+    AudioObjectPropertyAddress a = { sel, scopeOf(isInput), (UInt32)channel };
+    CFStringRef nm = nullptr; UInt32 sz = sizeof nm;
+    if (AudioObjectGetPropertyData(d, &a, 0, nullptr, &sz, &nm) != noErr || !nm) return {};
+    std::string s = toUtf8(nm);
+    CFRelease(nm);
+    return s;
+}
+}  // namespace
+
+std::string channelCategory(AudioDeviceID d, bool isInput, int channel) {
+    return elementString(d, kAudioObjectPropertyElementCategoryName, isInput, channel);
+}
+
+std::string channelNumber(AudioDeviceID d, bool isInput, int channel) {
+    return elementString(d, kAudioObjectPropertyElementNumberName, isInput, channel);
+}
+
+int bytesPerSample(AudioDeviceID d) {
+    AudioObjectPropertyAddress a = { kAudioDevicePropertyStreams, kAudioObjectPropertyScopeOutput,
+                                     kAudioObjectPropertyElementMain };
+    UInt32 sz = 0;
+    if (AudioObjectGetPropertyDataSize(d, &a, 0, nullptr, &sz) != noErr || sz < sizeof(AudioStreamID)) return 0;
+    std::vector<AudioStreamID> streams(sz / sizeof(AudioStreamID));
+    if (AudioObjectGetPropertyData(d, &a, 0, nullptr, &sz, streams.data()) != noErr) return 0;
+    AudioObjectPropertyAddress f = { kAudioStreamPropertyPhysicalFormat, kAudioObjectPropertyScopeGlobal,
+                                     kAudioObjectPropertyElementMain };
+    AudioStreamBasicDescription asbd {};
+    UInt32 fs = sizeof asbd;
+    if (AudioObjectGetPropertyData(streams[0], &f, 0, nullptr, &fs, &asbd) != noErr
+        || asbd.mChannelsPerFrame == 0) return 0;
+    return (int)(asbd.mBytesPerFrame / asbd.mChannelsPerFrame);
+}
+
+bool preferredStereo(AudioDeviceID d, bool isInput, UInt32& left, UInt32& right) {
+    AudioObjectPropertyAddress a = { kAudioDevicePropertyPreferredChannelsForStereo, scopeOf(isInput),
+                                     kAudioObjectPropertyElementMain };
+    UInt32 ch[2] = { 0, 0 }; UInt32 sz = sizeof ch;
+    if (AudioObjectGetPropertyData(d, &a, 0, nullptr, &sz, ch) != noErr) return false;
+    left = ch[0]; right = ch[1];
+    return true;
+}
+
+bool setPreferredStereo(AudioDeviceID d, bool isInput, UInt32 left, UInt32 right) {
+    AudioObjectPropertyAddress a = { kAudioDevicePropertyPreferredChannelsForStereo, scopeOf(isInput),
+                                     kAudioObjectPropertyElementMain };
+    UInt32 ch[2] = { left, right };
+    return AudioObjectSetPropertyData(d, &a, 0, nullptr, sizeof ch, ch) == noErr;
+}
+
+std::string deviceUID(AudioDeviceID d) {
+    AudioObjectPropertyAddress a = { kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal,
+                                     kAudioObjectPropertyElementMain };
+    CFStringRef s = nullptr; UInt32 sz = sizeof s;
+    if (AudioObjectGetPropertyData(d, &a, 0, nullptr, &sz, &s) != noErr || !s) return {};
+    std::string out = toUtf8(s);
+    CFRelease(s);
+    return out;
+}
+
+struct Listener {
+    AudioDeviceID device;
+    std::vector<AudioObjectPropertyAddress> addresses;
+    AudioObjectPropertyListenerBlock block;
+};
+
+Listener* addListener(AudioDeviceID d, const std::vector<AudioObjectPropertySelector>& selectors,
+                      void (^fn)(void)) {
+    auto* l = new Listener { d, {}, nil };
+    l->block = Block_copy(^(UInt32, const AudioObjectPropertyAddress*) { fn(); });
+    for (auto sel : selectors)
+        for (auto scope : { kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
+                            kAudioObjectPropertyScopeOutput }) {
+            AudioObjectPropertyAddress a = { sel, scope, kAudioObjectPropertyElementMain };
+            if (!AudioObjectHasProperty(d, &a)) continue;
+            if (AudioObjectAddPropertyListenerBlock(d, &a, dispatch_get_main_queue(), l->block) == noErr)
+                l->addresses.push_back(a);
+        }
+    return l;
+}
+
+void removeListener(Listener* l) {
+    if (!l) return;
+    for (auto& a : l->addresses)
+        AudioObjectRemovePropertyListenerBlock(l->device, &a, dispatch_get_main_queue(), l->block);
+    Block_release(l->block);
+    delete l;
+}
+
+bool uint32Property(AudioDeviceID d, AudioObjectPropertySelector sel,
+                    AudioObjectPropertyScope scope, UInt32& value) {
+    AudioObjectPropertyAddress a = { sel, scope, kAudioObjectPropertyElementMain };
+    if (!AudioObjectHasProperty(d, &a)) return false;
+    UInt32 v = 0, sz = sizeof v;
+    if (AudioObjectGetPropertyData(d, &a, 0, nullptr, &sz, &v) != noErr) return false;
+    value = v;
+    return true;
+}
+
+bool setUint32Property(AudioDeviceID d, AudioObjectPropertySelector sel,
+                       AudioObjectPropertyScope scope, UInt32 value) {
+    AudioObjectPropertyAddress a = { sel, scope, kAudioObjectPropertyElementMain };
+    return AudioObjectSetPropertyData(d, &a, 0, nullptr, sizeof value, &value) == noErr;
 }
 
 }  // namespace device
