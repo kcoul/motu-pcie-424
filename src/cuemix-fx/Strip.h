@@ -2,18 +2,9 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include <functional>
+#include "ConsoleModel.h"
 
-// The CueMix values one input strip shows, for the mix currently selected.
-struct StripState {
-    int trim = 64, inputMute = 0;          // per input
-    int volume = 32768, pan = 64;          // per (mix bus, input)
-    int mute = 0, solo = 0;
-    bool operator==(const StripState& o) const {
-        return trim == o.trim && inputMute == o.inputMute && volume == o.volume && pan == o.pan
-            && mute == o.mute && solo == o.solo;
-    }
-};
+#include <functional>
 
 // One input strip: the input section (MUTE, TRIM, name) above the mix section
 // (PAN, fader, SOLO, MUTE) — the order of MOTU's console. First pass: it shows
@@ -48,7 +39,3 @@ private:
     juce::Label trimValue_, panValue_, faderValue_, nameTop_, nameBottom_;
 };
 
-// Tentative displays. Only 32768 = unity and 64 = centre are observed; the
-// laws around them are not verified yet.
-juce::String volumeText(int raw);
-juce::String panText(int raw);

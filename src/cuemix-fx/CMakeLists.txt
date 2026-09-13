@@ -8,7 +8,10 @@ juce_add_gui_app(CueMixFX
 
 target_sources(CueMixFX PRIVATE
     Main.cpp
+    ClassicConsole.cpp
+    ClassicSkin.cpp
     Console.cpp
+    ConsoleModel.cpp
     Strip.cpp)
 
 target_compile_definitions(CueMixFX PRIVATE

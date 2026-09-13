@@ -5,9 +5,9 @@
 #include <cmath>
 
 namespace {
-constexpr int kVolumeMax = 65536;
-// Put unity (32768) three quarters of the way up the fader, where consoles do.
-const double kFaderSkew = std::log(0.75) / std::log(0.5);
+// MOTU's fader tops out at 0 dB (32768); see the scale printed in FaderBody.png.
+constexpr int kVolumeMax = 32768;
+const double kFaderSkew = 3.0;
 
 void styleLabel(juce::Label& l, float size, juce::Colour colour) {
     l.setFont(juce::FontOptions(size));
@@ -25,16 +25,6 @@ void styleButton(juce::TextButton& b, juce::Colour on) {
     b.setInterceptsMouseClicks(false, false);   // read-only first pass
 }
 }  // namespace
-
-juce::String volumeText(int raw) {
-    if (raw <= 0) return "-inf";
-    return juce::String(20.0 * std::log10(raw / 32768.0), 1) + " dB";
-}
-
-juce::String panText(int raw) {
-    const int p = raw - 64;
-    return p == 0 ? "C" : (p < 0 ? "L" + juce::String(-p) : "R" + juce::String(p));
-}
 
 Strip::Strip(int inputId, const juce::String& interfaceName, const juce::String& channelName)
     : id_(inputId), iface_(interfaceName), name_(channelName) {
@@ -74,7 +64,7 @@ void Strip::setState(const StripState& s) {
     mute_.setToggleState(s.mute != 0, juce::dontSendNotification);
     solo_.setToggleState(s.solo != 0, juce::dontSendNotification);
     trim_.setValue(s.trim, juce::dontSendNotification);
-    trimValue_.setText(juce::String(s.trim - 64), juce::dontSendNotification);
+    trimValue_.setText(juce::String(s.trim - 64) + " dB", juce::dontSendNotification);
     pan_.setValue(s.pan, juce::dontSendNotification);
     panValue_.setText(panText(s.pan), juce::dontSendNotification);
     fader_.setValue(s.volume, juce::dontSendNotification);

@@ -7,8 +7,6 @@
 
 namespace {
 constexpr int kPanelWidth = 250;
-constexpr int kPollHz = 10;
-const double kFaderSkew = std::log(0.75) / std::log(0.5);
 
 void styleLabel(juce::Label& l, float size, juce::Colour c, juce::Justification j = juce::Justification::centredLeft) {
     l.setFont(juce::FontOptions(size));
@@ -16,15 +14,9 @@ void styleLabel(juce::Label& l, float size, juce::Colour c, juce::Justification 
     l.setJustificationType(j);
 }
 
-// "HD192:Analog-A" -> { "HD192", "Analog-A" }
-std::pair<juce::String, juce::String> splitDescription(const juce::String& d) {
-    const int colon = d.indexOfChar(':');
-    if (colon < 0) return { {}, d };
-    return { d.substring(0, colon), d.substring(colon + 1) };
-}
 }  // namespace
 
-Console::Console() {
+Console::Console(ConsoleModel& model) : model_(model) {
     viewport_.setViewedComponent(&stripHolder_, false);
     viewport_.setScrollBarsShown(false, true);
     viewport_.setScrollBarThickness(kScrollBar);
@@ -42,7 +34,7 @@ Console::Console() {
     banner_.setText("Read-only first pass: shows the card's CueMix state live. Controls will write "
                     "once their encodings are verified (docs/CUEMIX-PLAN.md).", juce::dontSendNotification);
 
-    master_.setNormalisableRange({ 0.0, 65536.0, 1.0, kFaderSkew });
+    master_.setNormalisableRange({ 0.0, 32768.0, 1.0, 3.0 });
     master_.setInterceptsMouseClicks(false, false);
     masterMute_.setColour(juce::TextButton::buttonColourId, ConsoleLookAndFeel::well());
     masterMute_.setColour(juce::TextButton::buttonOnColourId, ConsoleLookAndFeel::mute());
@@ -50,11 +42,7 @@ Console::Console() {
     masterMute_.setInterceptsMouseClicks(false, false);
 
     // Choosing which mix to *view* changes nothing on the card, so it is live.
-    mixBox_.onChange = [this] {
-        const int i = mixBox_.getSelectedItemIndex();
-        if (juce::isPositiveAndBelow(i, (int)buses_.size())) bus_ = buses_[(size_t)i];
-        poll();
-    };
+    mixBox_.onChange = [this] { model_.selectMix(mixBox_.getSelectedItemIndex()); };
 
     for (juce::Component* c : { (juce::Component*)&lcdTitle_, (juce::Component*)&lcdDetail_,
                                 (juce::Component*)&lcdBudget_, (juce::Component*)&mixLabel_,
@@ -63,64 +51,23 @@ Console::Console() {
                                 (juce::Component*)&masterMute_, (juce::Component*)&banner_ })
         addAndMakeVisible(c);
 
-    connect();
-    startTimerHz(kPollHz);
+    showInLcd(model_.connected() ? "PCI-424" : "Not connected", model_.error());
+    model_.onChange = [this](bool layout) { modelChanged(layout); };
+    modelChanged(true);
 }
 
-Console::~Console() { stopTimer(); }
-
-void Console::connect() {
-    dev_ = motu::Card::findDevice();
-    std::string err;
-    if (dev_) card_ = motu::Card::open(dev_, &err);
-    else err = "No PCI-424 was found. Is MOTUPCIAudio.kext loaded?";
-    showInLcd(card_ ? "PCI-424" : "Not connected", card_ ? juce::String() : juce::String(err));
-    syncLayout();
-}
+Console::~Console() { model_.onChange = nullptr; }
 
 int Console::idealWidth() const {
-    return (int)juce::jmax<size_t>(strips_.size(), 1) * Strip::kWidth + kPanelWidth;
+    return (int)juce::jmax<size_t>(model_.strips().size(), 1) * Strip::kWidth + kPanelWidth;
 }
 
-void Console::timerCallback() {
-    syncLayout();
-    poll();
-}
-
-juce::String Console::busName(int bus) {
-    motu::Exception e;
-    const auto [iface, kind] = splitDescription(card_.outputDescription(e, bus));
-    const int n = card_.bankRelativeID(e, bus) + 1;
-    return iface + ":" + kind + " " + juce::String(n) + "-" + juce::String(n + 1);
-}
-
-// Strips are the card's active inputs; mixes are the output pairs CueMix
-// accepts as buses. Both are re-read every tick and rebuilt only on change.
-void Console::syncLayout() {
-    if (!card_) return;
-    motu::Exception e;
-
-    std::vector<int> ids;
-    for (int n = 0, count = card_.numActiveInputs(e); n < count; ++n) {
-        const int id = card_.nthActiveInputID(e, n);
-        if (!e.raised()) ids.push_back(id);
-    }
-    std::vector<int> buses;
-    for (int id = 0, count = card_.numOutputs(e); id + 1 < count; id += 2) {
-        motu::Exception x;
-        if (!card_.outputState(x, id).exists) continue;
-        card_.cueMix(x).busVolume(x, id);          // range-checked: raises if not a bus
-        if (!x.raised()) buses.push_back(id);
-    }
-
-    if (ids != inputIds_) {
-        inputIds_ = ids;
+void Console::modelChanged(bool layout) {
+    const auto& strips = model_.strips();
+    if (layout) {
         strips_.clear();
-        for (int id : inputIds_) {
-            const auto [iface, kind] = splitDescription(card_.inputDescription(e, id));
-            juce::String name = card_.channelName(e, id, true);
-            if (name.isEmpty()) name = kind + " " + juce::String(card_.bankRelativeID(e, id) + 1);
-            auto strip = std::make_unique<Strip>(id, iface, name);
+        for (const auto& info : strips) {
+            auto strip = std::make_unique<Strip>(info.id, info.interfaceName, info.channelName);
             strip->onHover = [this](const Strip& s) {
                 showInLcd(s.channelName(), s.interfaceName() + "  input " + juce::String(s.inputId()));
             };
@@ -128,56 +75,22 @@ void Console::syncLayout() {
             strips_.push_back(std::move(strip));
         }
         stripHolder_.setSize((int)strips_.size() * Strip::kWidth, Strip::kHeight);
-        for (size_t i = 0; i < strips_.size(); ++i)
-            strips_[i]->setTopLeftPosition((int)i * Strip::kWidth, 0);
-    }
+        for (size_t i = 0; i < strips_.size(); ++i) strips_[i]->setTopLeftPosition((int)i * Strip::kWidth, 0);
 
-    if (buses != buses_) {
-        buses_ = buses;
         mixBox_.clear(juce::dontSendNotification);
-        for (size_t i = 0; i < buses_.size(); ++i) {
-            mixBox_.addItem(busName(buses_[i]), (int)i + 1);
-            if (buses_[i] == bus_) mixBox_.setSelectedItemIndex((int)i, juce::dontSendNotification);
-        }
-        if (mixBox_.getSelectedItemIndex() < 0 && !buses_.empty()) {
-            bus_ = buses_.front();
-            mixBox_.setSelectedItemIndex(0, juce::dontSendNotification);
-        }
+        for (int i = 0; i < model_.numMixes(); ++i) mixBox_.addItem(model_.mixName(i) + "  " + model_.mixOutputName(i), i + 1);
     }
-}
+    mixBox_.setSelectedItemIndex(model_.selectedMix(), juce::dontSendNotification);
+    for (size_t i = 0; i < strips_.size() && i < strips.size(); ++i) strips_[i]->setState(strips[i].state);
 
-void Console::poll() {
-    if (!card_) return;
-    motu::Exception e;
-    motu::CueMix cue = card_.cueMix(e);
-    if (!cue) return;
-
-    const bool validBus = std::find(buses_.begin(), buses_.end(), bus_) != buses_.end();
-    for (auto& s : strips_) {
-        StripState st;
-        const int id = s->inputId();
-        st.trim = cue.inputTrim(e, id);
-        st.inputMute = cue.inputMute(e, id);
-        if (validBus) {
-            st.volume = cue.volume(e, bus_, id);
-            st.pan = cue.pan(e, bus_, id);
-            st.mute = cue.mute(e, bus_, id);
-            st.solo = cue.solo(e, bus_, id);
-        }
-        s->setState(st);
-    }
-
-    if (validBus) {
-        const int v = cue.busVolume(e, bus_);
-        master_.setValue(v, juce::dontSendNotification);
-        masterValue_.setText(volumeText(v), juce::dontSendNotification);
-        masterMute_.setToggleState(cue.busMute(e, bus_), juce::dontSendNotification);
-        outputLabel_.setText("OUTPUT  " + busName(bus_), juce::dontSendNotification);
-    }
-    const auto r = cue.resources(e);
+    master_.setValue(model_.masterVolume(), juce::dontSendNotification);
+    masterValue_.setText(volumeText(model_.masterVolume()), juce::dontSendNotification);
+    masterMute_.setToggleState(model_.masterMute(), juce::dontSendNotification);
+    outputLabel_.setText("OUTPUT  " + model_.mixOutputName(model_.selectedMix()), juce::dontSendNotification);
+    const auto r = model_.resources();
     lcdBudget_.setText(juce::String(r.used) + " out of " + juce::String(r.max) + " faders in use\n"
-                       + juce::String((int)strips_.size()) + " inputs, " + juce::String((int)buses_.size())
-                       + " mixes", juce::dontSendNotification);
+                       + juce::String((int)strips.size()) + " inputs, " + juce::String(model_.numMixes()) + " mixes",
+                       juce::dontSendNotification);
 }
 
 void Console::showInLcd(const juce::String& title, const juce::String& detail) {
