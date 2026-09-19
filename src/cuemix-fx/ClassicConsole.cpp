@@ -1,5 +1,7 @@
 #include "ClassicConsole.h"
 
+#include "Meter.h"
+
 #include <cmath>
 
 namespace {
@@ -79,9 +81,12 @@ ClassicConsole::ClassicConsole(ConsoleModel& model, ClassicSkin& skin) : model_(
     lcdTitle_ = model_.connected() ? juce::String() : juce::String("Not connected");
     lcdDetail_ = model_.error();
     model_.onChange = [this](bool) { setScroll(scroll_); repaint(); };
+    // Meters tick faster than the control poll. Repaint only the strip area,
+    // which is where the meters and clip LEDs live.
+    model_.onMeters = [this] { repaint(kStripsLeft, 0, stripsWidth(), kHeight); };
 }
 
-ClassicConsole::~ClassicConsole() { model_.onChange = nullptr; }
+ClassicConsole::~ClassicConsole() { model_.onChange = nullptr; model_.onMeters = nullptr; }
 
 int ClassicConsole::idealWidth() const {
     return kStripsLeft + (int)juce::jmax<size_t>(model_.strips().size(), 4) * kStripPitch + kPanelWidth;
@@ -105,10 +110,12 @@ void ClassicConsole::paint(juce::Graphics& g) {
         juce::Graphics::ScopedSaveState s(g);
         g.reduceClipRegion(kStripsLeft, 0, stripsWidth(), kHeight);
         const auto& strips = model_.strips();
+        const auto& meters = model_.meters();
+        const ConsoleModel::MeterState quiet {};
         for (size_t i = 0; i < strips.size(); ++i) {
             const int x = kStripsLeft + (int)i * kStripPitch - scroll_;
             if (x + kStripPitch < 0 || x > panelX()) continue;
-            paintStrip(g, strips[i], x);
+            paintStrip(g, strips[i], i < meters.size() ? meters[i] : quiet, x);
         }
     }
 
@@ -116,7 +123,8 @@ void ClassicConsole::paint(juce::Graphics& g) {
     paintPanel(g, panelX());
 }
 
-void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info, int x) {
+void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info,
+                                const ConsoleModel::MeterState& m, int x) {
     const auto& st = info.state;
 
     // Input section.
@@ -128,7 +136,9 @@ void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info, int x)
     const int tf = trimFrame(st.trim);
     if (tf > 4) drawLitArc(g, x + 23, 48, -135.0f, frameAngle(tf));
     skin_.drawFrame(g, "KnobRotation", 26, 26, tf, x + 10, 35);
-    skin_.drawFrame(g, "TrimClipIndicator", 6, 6, 0, x + 44, 33);   // 3 frames: off, signal, clip
+    // 3 frames: off, signal, clip. The card's clip field is an enum, not a
+    // boolean; meter::clipFrame maps it (docs/CUEMIX-API.md).
+    skin_.drawFrame(g, "TrimClipIndicator", 6, 6, meter::clipFrame(m.clipRaw), x + 44, 33);
     left(g, "TRIM", 11.5f, kLabel, x + 53, 37, 30);
     centred(g, juce::String(st.trim - 64) + " dB", 12.0f, kWellText, x + 62, 54, 36);
 
@@ -163,6 +173,11 @@ void ClassicConsole::paintStrip(juce::Graphics& g, const StripInfo& info, int x)
     centred(g, "SOLO", 9.5f, kLabel, x + 12, 320, 30);
     skin_.drawFrame(g, "ColorButtons", 24, 17, st.mute ? 1 : 0, 2, x + 1, 327);
     centred(g, "MUTE", 9.5f, kLabel, x + 12, 347, 30);
+
+    // Level meter. The unlit column is baked into ChannelStripMixLegacy at
+    // (65, 72), so the Level sprite's origin lands at (x + 65, 223) -- the same
+    // y as the master meters. No cap here: the strip art owns that area.
+    meter::drawClassic(g, skin_, x + 65, 223, m.level, m.peak, m.clip(), false);
 
     skin_.drawFrame(g, "FaderCap", 22, 47, 0, x + 38, faderCapTop(st.volume));
     centred(g, volumeText(st.volume), 12.0f, kWellText, x + 55, 442, 44);

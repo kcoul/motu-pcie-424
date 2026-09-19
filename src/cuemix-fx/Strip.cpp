@@ -1,5 +1,7 @@
 #include "Strip.h"
 
+#include "Meter.h"
+
 #include "ConsoleLookAndFeel.h"
 
 #include <cmath>
@@ -102,10 +104,11 @@ void Strip::paint(juce::Graphics& g) {
     g.drawText("TRIM", 0, 30, getWidth(), 10, juce::Justification::centred);
     g.drawText("PAN", 0, 156, getWidth(), 10, juce::Justification::centred);
 
-    // Meter placeholder, beside the fader: ReadLevelMeters is not decoded yet.
+    // Level meter beside the fader, in MOTU's proportions (docs/CUEMIX-API.md).
     const auto f = fader_.getBounds();
-    g.setColour(ConsoleLookAndFeel::well());
-    g.fillRoundedRectangle((float)f.getRight() + 2.0f, (float)f.getY() + 8.0f, 6.0f, (float)f.getHeight() - 16.0f, 2.0f);
+    meter::drawModern(g, juce::Rectangle<float>((float)f.getRight() + 2.0f, (float)f.getY(),
+                                                8.0f, (float)f.getHeight()),
+                      meter_.level, meter_.peak, meter_.clip());
 }
 
 void Strip::resized() {

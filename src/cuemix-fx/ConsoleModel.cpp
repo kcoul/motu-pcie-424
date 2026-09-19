@@ -4,6 +4,8 @@
 
 namespace {
 constexpr int kPollHz = 10;
+// Control state at 10 Hz is fine; a meter at 10 Hz looks broken.
+constexpr int kMeterHz = 30;
 
 // "HD192:Analog-A" -> { "HD192", "Analog-A" }
 std::pair<juce::String, juce::String> splitDescription(const juce::String& d) {
@@ -13,13 +15,40 @@ std::pair<juce::String, juce::String> splitDescription(const juce::String& d) {
 }
 }  // namespace
 
-double volumeDb(int raw) { return raw <= 0 ? -1000.0 : 20.0 * std::log10(raw / 32768.0); }
+// MOTU's own laws, recovered from CueMix FX's binary. See docs/CUEMIX-API.md.
+//
+// The fader coefficient is 40, not 20: DigiVolToDecibelString does
+// 40 * log10(raw / 32768), which gives the fader an 84 dB range over its 129
+// quantized steps instead of 42 dB.
+double volumeDb(int raw) { return raw <= 0 ? -1000.0 : 40.0 * std::log10(raw / 32768.0); }
 
+// Formatting is MOTU's too: "-inf" at or below -90 dB, "0.0" inside +/-0.1 dB,
+// one decimal below 40 dB and none above it, and the caller's " dB" suffix
+// (ValueLegacyFader::GetUIStringWithHardwareValue).
 juce::String volumeText(int raw) {
-    return raw <= 0 ? juce::String("-inf") : juce::String(volumeDb(raw), 1) + " dB";
+    const double db = volumeDb(raw);
+    if (db <= -90.0) return "-inf dB";
+    if (std::abs(db) < 0.1) return "0.0 dB";
+    return (std::abs(db) < 40.0 ? juce::String(db, 1) : juce::String(juce::roundToInt(db)))
+         + " dB";
 }
 
-juce::String panText(int raw) { return juce::String(raw - 64); }
+// The fader writes only multiples of 256, capped at 0x8000: MOTU's
+// ValueLegacyFader::ConvertFromUIControlValue masks the value with 0xFF00.
+int quantizeVolume(int raw) {
+    return juce::jlimit(0, 32768, raw) >= 32768 ? 32768 : (juce::jlimit(0, 32768, raw) & 0xFF00);
+}
+
+// Pan and trim read as a signed offset with an explicit '+' when positive
+// (ValuePanLegacy / ValueLegacyTrim::GetUIStringWithHardwareValue). Pan is
+// centred on 64; trim is *not* offset -- its hardware value is the number
+// shown, over a per-channel range we have not read yet.
+static juce::String signedText(int n) {
+    return (n > 0 ? "+" : "") + juce::String(n);
+}
+
+juce::String panText(int raw) { return signedText(raw - 64); }
+juce::String trimText(int raw) { return signedText(raw); }
 
 ConsoleModel::ConsoleModel() {
     dev_ = motu::Card::findDevice();
@@ -29,9 +58,107 @@ ConsoleModel::ConsoleModel() {
     error_ = juce::String(err);
     refresh();
     startTimerHz(kPollHz);
+    meterTimer_.startTimerHz(kMeterHz);
 }
 
-ConsoleModel::~ConsoleModel() { stopTimer(); }
+ConsoleModel::~ConsoleModel() { stopTimer(); meterTimer_.stopTimer(); }
+
+// --- Level meters ----------------------------------------------------------
+//
+// MOTU's ballistics, from LevelMeterView::SetValue(float, unsigned):
+//
+//   * the bar follows the incoming value immediately -- there is no attack or
+//     release on it, because each read already reports the peak since the last
+//     one;
+//   * a new value at or above the held peak replaces it and restarts the hold
+//     at now + peakHoldSeconds;
+//   * once the hold has expired (and is not "Infinite"), the peak falls by
+//     kPeakDecayPerTick per update, but only after the bar itself has dropped
+//     below kPeakDecayFloor.
+//
+// The two constants are MOTU's (0.015 and 0.005). They are per *update*, and
+// MOTU's own update rate is not in the binary, so the visible decay speed is
+// the one thing to calibrate by eye against MOTU's console.
+static constexpr float kPeakDecayPerTick = 0.015f;
+static constexpr float kPeakDecayFloor   = 0.005f;
+
+void ConsoleModel::applyBallistics(MeterState& m, float level, double now) {
+    m.level = juce::jlimit(0.0f, 1.0f, level);
+
+    const size_t i = (size_t)(&m - meters_.data());
+    if (i >= peakHoldUntil_.size()) peakHoldUntil_.resize(meters_.size(), 0.0);
+
+    if (m.level >= m.peak) {
+        m.peak = m.level;
+        peakHoldUntil_[i] = now + (peakHoldSeconds_ < 0.0 ? 1.0e9 : peakHoldSeconds_);
+    } else if (peakHoldSeconds_ >= 0.0 && now > peakHoldUntil_[i]
+               && m.level <= kPeakDecayFloor) {
+        m.peak = juce::jmax(0.0f, m.peak - kPeakDecayPerTick);
+    }
+}
+
+void ConsoleModel::clearPeaks() {
+    for (auto& m : meters_) m.peak = 0.0f;
+    std::fill(peakHoldUntil_.begin(), peakHoldUntil_.end(), 0.0);
+    if (onMeters) onMeters();
+}
+
+// With no card, drive the meters from a test signal so the widget can be built
+// and reviewed away from the studio: a slow sweep per strip at different
+// phases, with an occasional deliberate clip.
+void ConsoleModel::synthesizeMeters(double now) {
+    for (size_t i = 0; i < meters_.size(); ++i) {
+        const double phase = now * 0.6 + (double)i * 0.45;
+        const double env = 0.5 - 0.5 * std::cos(phase);          // 0..1
+        const double wobble = 0.85 + 0.15 * std::sin(now * 7.0 + (double)i);
+        float level = (float)juce::jlimit(0.0, 1.0, env * wobble);
+        applyBallistics(meters_[i], level, now);
+        // Clip the loudest strips briefly, so the indicator is exercised.
+        meters_[i].clipRaw = level > 0.98f ? 1 : 0;
+    }
+}
+
+void ConsoleModel::pollMeters() {
+    const size_t n = strips_.size();
+    if (meters_.size() != n) {
+        meters_.assign(n, MeterState{});
+        peakHoldUntil_.assign(n, 0.0);
+    }
+    if (n == 0) return;
+
+    const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+
+    if (!card_) {
+        synthesizeMeters(now);
+        if (onMeters) onMeters();
+        return;
+    }
+
+    motu::Exception e;
+    motu::CueMix cue = card_.cueMix(e);
+    if (!cue || buses_.empty()) return;
+
+    // MOTU meters only the strips on screen, capped at the card's maximum, and
+    // passes the raw bus id (docs/CUEMIX-API.md).
+    int maxMeters = card_.maxLevelMeters(e);
+    if (e.raised() || maxMeters <= 0) maxMeters = motu::CueMix::kMaxMeters;
+    const int count = juce::jmin((int)n, maxMeters, (int)motu::CueMix::kMaxMeters);
+
+    motu::CueMix::LevelMeterRequest req;
+    req.bus = (std::uint32_t)buses_[(size_t)mix_];
+    req.numChannels = (std::uint32_t)count;
+    for (int i = 0; i < count; ++i) req.channels[i] = (std::uint32_t)strips_[(size_t)i].id;
+
+    motu::CueMix::LevelMeterResults res;
+    cue.readLevelMeters(e, req, &res);
+    if (e.raised()) return;
+
+    for (int i = 0; i < count; ++i) {
+        applyBallistics(meters_[(size_t)i], (float)res.level[i] / 32768.0f, now);
+        meters_[(size_t)i].clipRaw = res.clip[i];
+    }
+    if (onMeters) onMeters();
+}
 
 juce::String ConsoleModel::mixName(int index) const { return "Mix " + juce::String(index + 1); }
 
@@ -59,12 +186,45 @@ void ConsoleModel::refresh() {
         noticeTitle_ = noticeDetail_ = {};
         if (onChange) onChange(false);
     }
-    if (!card_) return;
+    if (!card_) {
+        if (syncDemoLayout() && onChange) onChange(true);
+        return;
+    }
     // Names can change from outside (PCI Audio Setup's editor): re-read each second.
     const bool names = (++ticks_ % 10 == 0) && refreshNames();
     const bool layout = syncLayout() || names;
     const bool values = poll();
     if ((layout || values) && onChange) onChange(layout);
+}
+
+// With no card there is nothing to enumerate, so build a stand-in layout: the
+// console then draws, and the meters run off the test signal. It exists so the
+// skins can be worked on and reviewed away from the studio, and it is never
+// used when a card is present -- `connected()` stays false and the LCD says so.
+bool ConsoleModel::syncDemoLayout() {
+    if (!strips_.empty()) return false;
+    static const char* const kDemo[][2] = {
+        { "HD192",   "Analog 1" }, { "HD192",   "Analog 2" },
+        { "HD192",   "Analog 3" }, { "HD192",   "Analog 4" },
+        { "24I/O-2", "Analog 1" }, { "24I/O-2", "Analog 2" },
+        { "24I/O-2", "Analog 3" }, { "24I/O-2", "Analog 4" },
+        { "2408mk3", "AES 1" },    { "2408mk3", "AES 2" },
+        { "2408mk3", "ADAT 1" },   { "2408mk3", "ADAT 2" },
+    };
+    for (int i = 0; i < (int)(sizeof kDemo / sizeof kDemo[0]); ++i) {
+        StripInfo s;
+        s.id = i;
+        s.interfaceName = kDemo[i][0];
+        s.channelName = kDemo[i][1];
+        s.state.volume = 24320 + (i % 5) * 1024;    // on the 256 grid, as the card would be
+        s.state.pan = 64 + (i % 3 - 1) * 24;
+        strips_.push_back(s);
+    }
+    buses_.clear();
+    for (int b = 0; b < 12; ++b) buses_.push_back(b * 2);   // bus id = mix * 2
+    busNames_.clear();
+    for (int b = 0; b < 12; ++b) busNames_.add("Analog " + juce::String(b * 2 + 1) + "-" + juce::String(b * 2 + 2));
+    return true;
 }
 
 bool ConsoleModel::syncLayout() {
@@ -171,11 +331,58 @@ void ConsoleModel::clearLocalChanges() {
     if (onChange) onChange(false);
 }
 
+void ConsoleModel::setWritesEnabled(bool on) {
+    writes_ = on;
+    showNotice("Send Changes to Card", on ? "on  (writes are unverified)" : "off");
+}
+
+// Each case is one line of docs/CUEMIX-API.md. `bus` is a raw bus id -- the
+// even output-pair id MOTU's wrapper produces by doubling a 0..47 mix index --
+// which is what buses_ already holds.
+//
+// The fader is quantized on the way out because MOTU's is: the console can only
+// produce multiples of 256, so sending anything else would put the card in a
+// state MOTU's own app could never reach.
+bool ConsoleModel::writeToCard(Param p, int value, int id) {
+    if (!writes_ || !card_ || buses_.empty()) return false;
+    motu::Exception e;
+    motu::CueMix cue = card_.cueMix(e);
+    if (!cue) return false;
+    const int bus = buses_[(size_t)mix_];
+
+    switch (p) {
+        case Param::Trim:         cue.setInputTrim(e, id, value); break;
+        case Param::InputMute:    cue.setInputMute(e, id, value != 0); break;
+        case Param::Volume:       cue.setVolume(e, bus, id, quantizeVolume(value)); break;
+        case Param::Pan:          cue.setPan(e, bus, id, value); break;
+        case Param::Mute:         cue.setMute(e, bus, id, value != 0); break;
+        case Param::Solo:         cue.setSolo(e, bus, id, value != 0); break;
+        case Param::MasterVolume: cue.setBusVolume(e, bus, quantizeVolume(value)); break;
+        case Param::MasterMute:   cue.setBusMute(e, bus, value != 0); break;
+        // Stereo needs CommitChanges and the pair-mirroring MOTU does in
+        // SetInputValueByGlobalID; balance/width, talkback and the scope
+        // selectors are left for their own stages.
+        default: return false;
+    }
+    if (e.raised()) {
+        showNotice("Card refused the write", e.str());
+        return false;
+    }
+    return true;
+}
+
 void ConsoleModel::setLocal(Param p, int value, int strip) {
     const bool isStrip = perInput(p) && p != Param::MasterVolume && p != Param::MasterMute;
     if (isStrip && !juce::isPositiveAndBelow(strip, (int)strips_.size())) return;
     const int id = isStrip ? strips_[(size_t)strip].id : -1;
-    overrides_[{ perMix(p) ? currentBus() : -1, id, (int)p }] = value;
+    const auto key = std::tuple<int, int, int>{ perMix(p) ? currentBus() : -1, id, (int)p };
+    overrides_[key] = value;
+
+    // A successful write drops the local override, so the value shown from then
+    // on is the card's own -- if the card did not take it, the control snaps
+    // back rather than lying.
+    const bool sent = writeToCard(p, value, id);
+    if (sent) overrides_.erase(key);
     if (card_) poll();
 
     // Say what moved, and that it went nowhere.
@@ -205,7 +412,7 @@ void ConsoleModel::setLocal(Param p, int value, int strip) {
             what = juce::isPositiveAndBelow(value, (int)strips_.size()) ? strips_[(size_t)value].channelName : juce::String();
             break;
     }
-    showNotice(title, what + "  (not sent)");
+    showNotice(title, what + (sent ? "" : "  (not sent)"));
 }
 
 bool ConsoleModel::poll() {

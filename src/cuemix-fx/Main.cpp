@@ -15,7 +15,7 @@
 
 namespace {
 enum CommandIds {
-    kClassic = 0x3001, kModern, kLocate, kRevertLocal,
+    kClassic = 0x3001, kModern, kLocate, kRevertLocal, kSendToCard,
     // File
     kSaveHardwarePreset = 0x3100, kLoadHardwarePreset, kMix1Return, kHardwareFollowsStereo, kClose,
     // Edit
@@ -35,6 +35,12 @@ enum CommandIds {
 // Peak Hold Time submenu items (plain menu items, not commands).
 constexpr int kPeakHoldBase = 0x3900;
 const char* const kPeakHoldTimes[] = { "Off", "2 Seconds", "4 Seconds", "10 Seconds", "1 Minute", "5 Minutes", "Infinite" };
+// The same list in seconds, from MOTU's own
+// LevelMeterView::ConvertPeakHoldTimeEnumToSeconds, where -1 means hold until
+// Clear Peaks. MOTU's stored enum is 1-based over this list (its
+// PeakHoldTime = 3 is "4 Seconds"); the index used here is 0-based, so it is
+// not interchangeable with MOTU's pref value. See docs/CUEMIX-API.md.
+const double kPeakHoldSeconds[] = { 0.0, 2.0, 4.0, 10.0, 60.0, 300.0, -1.0 };
 
 using Mods = juce::ModifierKeys;
 constexpr int kCmd = Mods::commandModifier, kShift = Mods::shiftModifier, kAlt = Mods::altModifier;
@@ -60,7 +66,7 @@ const MenuCommand kCommands[] = {
     { kRedo, "Redo", 'z', kCmd | kShift, false, nullptr },
     { kCopy, "Copy", 'c', kCmd, true, "stage 5 (copy/paste a mix)" },
     { kPaste, "Paste", 'v', kCmd, false, nullptr },
-    { kClearPeaks, "Clear Peaks", '\\', kCmd, true, "stage 3 (meters)" },
+    { kClearPeaks, "Clear Peaks", '\\', kCmd, true, nullptr },
     { kDevice, "PCI-424", '1', kCmd, true, nullptr },
     { kFFT, "FFT Analysis", 0, 0, true, "stage 6 (analysis windows)" },
     { kOscilloscope, "Oscilloscope", 0, 0, true, "stage 6 (analysis windows)" },
@@ -136,6 +142,7 @@ public:
         appExtras.addCommandItem(&commands_, kModern);
         appExtras.addCommandItem(&commands_, kLocate);
         appExtras.addSeparator();
+        appExtras.addCommandItem(&commands_, kSendToCard);
         appExtras.addCommandItem(&commands_, kRevertLocal);
         juce::MenuBarModel::setMacMainMenu(this, &appExtras);
     }
@@ -266,15 +273,16 @@ private:
 
     void menuItemSelected(int id, int) override {
         if (id >= kPeakHoldBase && id < kPeakHoldBase + (int)std::size(kPeakHoldTimes)) {
-            // Meters don't move yet, so the setting is only remembered for now.
-            prefs_->setValue("PeakHoldTime", id - kPeakHoldBase);
-            model_->showNotice("Peak Hold Time", juce::String(kPeakHoldTimes[id - kPeakHoldBase]) + " (meters: stage 3)");
+            const int sel = id - kPeakHoldBase;
+            prefs_->setValue("PeakHoldTime", sel);
+            model_->setPeakHoldSeconds(kPeakHoldSeconds[sel]);
+            model_->showNotice("Peak Hold Time", kPeakHoldTimes[sel]);
         }
     }
 
     void getAllCommands(juce::Array<juce::CommandID>& ids) override {
         JUCEApplication::getAllCommands(ids);
-        ids.addArray({ kClassic, kModern, kLocate, kRevertLocal });
+        ids.addArray({ kClassic, kModern, kLocate, kRevertLocal, kSendToCard });
         for (const auto& c : kCommands) ids.add(c.id);
     }
 
@@ -286,6 +294,11 @@ private:
             case kLocate:  info.setInfo("Locate MOTU CueMix FX.app...", {}, "View", 0); return;
             // Controls move without writing to the card yet; this drops those values.
             case kRevertLocal: info.setInfo("Revert to Card Values", {}, "View", 0); return;
+            case kSendToCard:
+                // Unverified write path (docs/CUEMIX-API.md): opt in per session.
+                info.setInfo("Send Changes to Card", "Write moved controls to the card", "View", 0);
+                info.setTicked(model_ != nullptr && model_->writesEnabled());
+                return;
             default: break;
         }
         if (const auto* c = findCommand(id)) {
@@ -305,6 +318,11 @@ private:
             case kModern:  showSkin(false); return true;
             case kLocate:  locateOriginal(); return true;
             case kRevertLocal: model_->clearLocalChanges(); return true;
+            case kSendToCard:
+                model_->setWritesEnabled(!model_->writesEnabled());
+                commands_.commandStatusChanged();
+                return true;
+            case kClearPeaks: model_->clearPeaks(); return true;
             case kClose:   systemRequestedQuit(); return true;
             case kMinimise: window_->setMinimised(true); return true;
             case kDevice:

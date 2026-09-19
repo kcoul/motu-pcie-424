@@ -55,10 +55,17 @@ Console::Console(ConsoleModel& model) : model_(model) {
 
     showInLcd(model_.connected() ? "PCI-424" : "Not connected", model_.error());
     model_.onChange = [this](bool layout) { modelChanged(layout); };
+    // Meters tick faster than the control poll, so they get their own hook and
+    // only touch the strips.
+    model_.onMeters = [this] {
+        const auto& m = model_.meters();
+        for (size_t i = 0; i < strips_.size() && i < m.size(); ++i)
+            strips_[i]->setMeter(m[i]);
+    };
     modelChanged(true);
 }
 
-Console::~Console() { model_.onChange = nullptr; }
+Console::~Console() { model_.onChange = nullptr; model_.onMeters = nullptr; }
 
 int Console::idealWidth() const {
     return (int)juce::jmax<size_t>(model_.strips().size(), 1) * Strip::kWidth + kPanelWidth;

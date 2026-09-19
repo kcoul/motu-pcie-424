@@ -31,7 +31,7 @@ public:
     void resized() override { setScroll(scroll_); }
 
 private:
-    void paintStrip(juce::Graphics&, const StripInfo&, int x);
+    void paintStrip(juce::Graphics&, const StripInfo&, const ConsoleModel::MeterState&, int x);
     void paintPanel(juce::Graphics&, int x);
     void paintScrollBar(juce::Graphics&);
     void drawLitArc(juce::Graphics&, int cx, int cy, float fromDeg, float toDeg);

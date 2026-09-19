@@ -13,6 +13,7 @@ target_sources(CueMixFX PRIVATE
     ClassicSkin.cpp
     Console.cpp
     ConsoleModel.cpp
+    Meter.cpp
     Strip.cpp)
 
 target_compile_definitions(CueMixFX PRIVATE
