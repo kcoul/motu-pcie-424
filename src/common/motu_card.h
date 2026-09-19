@@ -34,6 +34,7 @@
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -116,6 +117,42 @@ public:
 
     struct PCIUsage { int a = -1, b = -1; };
     PCIUsage pciUsage(Exception&) const;   // observed -1,-1 on PCIe-424
+
+    // Level meters (slot 21). ReadLevelMeters is the one call whose argument
+    // shapes are not guessable from the signature, and MOTU's own wrapper
+    // (CoreDeviceAW::AWReadLevelMeters) is a bare pass-through -- so these
+    // layouts were recovered from its *caller*, CoreDeviceAW::UpdateLevelMeters,
+    // in MOTU's 2025 CueMix FX. Derivation in docs/CUEMIX-API.md.
+    //
+    // NOT YET CONFIRMED AGAINST A CARD. If the first read comes back with
+    // nonsense, suspect these before anything else.
+    //
+    // `bus` is a raw bus id, i.e. mix index * 2 -- MOTU doubles a 0..47 mix
+    // index on the way in, exactly as for every other CueMix call.
+    //
+    // `channels` holds card-wide input ids, and MOTU sends only the strips
+    // currently on screen, capped at Card::maxLevelMeters(). Reads are bounded
+    // by min(numChannels, maxLevelMeters), so asking for more is pointless.
+    static constexpr int kMaxMeters = 48;
+
+    struct LevelMeterRequest {
+        std::uint32_t bus = 0;                         // +0x00
+        std::uint32_t numChannels = 0;                 // +0x04
+        std::uint32_t channels[kMaxMeters] = {};       // +0x08
+    };
+
+    struct LevelMeterResults {
+        std::int32_t level[kMaxMeters] = {};   // +0x000 linear, full scale 32768
+        std::int32_t clip [kMaxMeters] = {};   // +0x0C0 0 = none; 1 and 2 both
+                                               //        seen, which is which is
+                                               //        unknown without signal
+        std::uint8_t tail[0x28] = {};          // +0x180 MOTU zeroes through
+                                               //        0x1A0 and never reads
+                                               //        it back; unidentified
+    };
+
+    void readLevelMeters(Exception&, const LevelMeterRequest&,
+                         LevelMeterResults*) const;
 
 private:
     void* p_;
@@ -315,6 +352,12 @@ public:
     void        setChannelName(Exception&, int id, bool isInput, const std::string&);
 
     unsigned    cardType(Exception&) const;
+
+    // How many level meters the card will report, which MOTU derives from
+    // cardType() via a three-entry table { 24, 24, 48 } defaulting to 48
+    // (CoreDeviceAW::AWGetMaxNumLevelMeters). Which row a PCIe-424 lands on
+    // has not been observed yet -- print cardType() and find out.
+    int         maxLevelMeters(Exception&) const;
     int         smuxCapable(Exception&) const;
     int         smuxSetting(Exception&) const;
     void        setSmuxSetting(Exception&, int);

@@ -43,6 +43,7 @@ using F_bank   = void  (*)(void*, void*, int, int, char*);
 using F_instate  = void (*)(void*, void*, int, unsigned char*, unsigned char*);
 using F_outstate = void (*)(void*, void*, int, unsigned char*, int*);
 using F_otherop  = int  (*)(void*, void*, bool, int, int*);
+using F_meters   = void (*)(void*, void*, const void*, void*);
 
 // Fixed-size C-string out-params. MOTU never documents the required buffer
 // size; 256 is comfortably above every string these APIs actually return.
@@ -130,6 +131,12 @@ CueMix::Resources CueMix::resources(Exception& e) const {
     Resources r; e.reset();
     fn<F_3ip>(p_, 22)(p_, e.raw, &r.used, &r.unidentified, &r.max);
     return r;
+}
+
+void CueMix::readLevelMeters(Exception& e, const LevelMeterRequest& req,
+                             LevelMeterResults* out) const {
+    e.reset();
+    fn<F_meters>(p_, 21)(p_, e.raw, &req, out);
 }
 
 CueMix::PCIUsage CueMix::pciUsage(Exception& e) const {
@@ -411,6 +418,13 @@ void Card::setChannelName(Exception& e, int id, bool isInput, const std::string&
     e.reset();
     fn<F_cfset>(p_, 30)(p_, e.raw, id, isInput, s);
     if (s) CFRelease(s);
+}
+
+int Card::maxLevelMeters(Exception& e) const {
+    const unsigned t = cardType(e);
+    if (e.raised()) return 0;
+    static const int kByCardType[3] = { 24, 24, 48 };
+    return t < 3 ? kByCardType[t] : 48;
 }
 
 unsigned Card::cardType(Exception& e) const {
