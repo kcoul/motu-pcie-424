@@ -47,17 +47,23 @@ set(MOTU_JUCE_FLAGS
 # Prefer a real certificate over ad-hoc: ad-hoc signing changes the cdhash on
 # every build, so TCC treats each rebuild as a new app and re-prompts for the
 # microphone. Re-run cmake after adding a certificate to pick it up.
+#
+# Selection is delegated to tools/sign-identity.sh, shared with tools/build.sh.
+# Do NOT inline "the first Apple Development cert" here again: this keychain has
+# certs from several teams, and the one that sorts first produces apps that will
+# not launch at all (Launchd job spawn failed, POSIX 162). The script documents
+# it.
 execute_process(
-    COMMAND security find-identity -v -p codesigning
-    OUTPUT_VARIABLE MOTU_IDENTITIES ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
-string(REGEX MATCH "\"(Apple Development[^\"]*)\"" _m "${MOTU_IDENTITIES}")
-if(CMAKE_MATCH_1)
-    set(MOTU_SIGN_ID "${CMAKE_MATCH_1}")
-    message(STATUS "Code signing identity: ${MOTU_SIGN_ID}")
-else()
+    COMMAND "${CMAKE_SOURCE_DIR}/tools/sign-identity.sh"
+    OUTPUT_VARIABLE MOTU_SIGN_ID ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT MOTU_SIGN_ID)
     set(MOTU_SIGN_ID "-")
+endif()
+if(MOTU_SIGN_ID STREQUAL "-")
     message(STATUS "Code signing identity: ad-hoc (microphone permission will "
                    "be re-requested on every build)")
+else()
+    message(STATUS "Code signing identity: ${MOTU_SIGN_ID}")
 endif()
 
 function(motu_sign target)

@@ -55,17 +55,21 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-# Signing identity: ad-hoc gives every build a fresh cdhash, so TCC sees each
-# rebuild as a new app and re-prompts for the microphone. A real certificate
-# keeps the designated requirement stable and the grant sticks. Use one if the
-# keychain has it; fall back to ad-hoc so the build never depends on it.
-IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
-           | sed -n 's/.*"\(Apple Development[^"]*\)".*/\1/p' | head -1)
-if [[ -n "$IDENTITY" ]]; then
-  print "signing as: $IDENTITY"
+# Signing identity comes from tools/sign-identity.sh -- shared with
+# CMakeLists.txt so the two cannot drift. It explains why "the first Apple
+# Development cert" is the wrong answer.
+IDENTITY=$(tools/sign-identity.sh)
+if [[ "$IDENTITY" == "-" ]]; then
+  print "signing ad-hoc (expect a microphone prompt on each rebuild)"
 else
-  IDENTITY="-"
+  print "signing as: $IDENTITY"
 fi
+
+# NOT hardened (--options runtime) on purpose. Hardened runtime turns on library
+# validation, and the card only works because MOTU's HALPlugin -- signed by MOTU,
+# a different team -- gets loaded into this process. Hardening this app without
+# also adding com.apple.security.cs.disable-library-validation would block that
+# load, and the failure would look like "the card pointer is NULL again".
 codesign -f -s "$IDENTITY" --entitlements tools/entitlements.plist "$APP"
 print "built $APP"
 
