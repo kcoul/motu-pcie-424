@@ -7,10 +7,16 @@ MOTU's last driver shipped in 2017. The card itself works perfectly on Sequoia �
 the kext loads, CoreAudio sees it, audio I/O is fine. Only the control surface
 is missing.
 
-Both original apps draw their entire UI through **Carbon** (MOTU's in-house
-`AwesomeLib` toolkit), so neither survives on modern macOS. `MOTU PCI Audio
-Setup` 1.5 is i386 PowerPlant and cannot launch at all; `CueMix FX` starts and
-exits immediately. See `docs/ORIGINAL-UI.md`.
+`MOTU PCI Audio Setup` 1.5 is i386 PowerPlant, draws through **Carbon** (MOTU's
+in-house `AwesomeLib` toolkit) and cannot launch on modern macOS at all.
+
+`CueMix FX` is a different story than earlier revisions of this file claimed.
+MOTU kept building it: the 2025 universal build is Cocoa-rendered, notarized,
+hardened, binds no Carbon symbols, and **runs fine on Sequoia** — it is driving
+an UltraLite mk3 Hybrid on the development machine. Signing, notarization,
+library validation, kext loading and the Carbon theory are all ruled out, with
+evidence, in `docs/ORIGINAL-UI.md`. What it does on a PCI-424 under Sequoia is
+an open question that needs the card to answer.
 
 The driver's CoreAudio HAL plugin still exposes MOTU's complete C++ control API.
 This project talks to it directly.
@@ -27,7 +33,9 @@ GetCueMixAPI / GetSMPTEAPI / GetTalkbackAPI   all non-NULL
 14 clock sources enumerated, 6 sample rates (44.1k–192k)
 ```
 
-UI work has not started.
+Both apps are built and interactive; CueMix FX is still read-only against the
+card. `docs/CUEMIX-API.md` now carries the decoded write path, value laws and
+meter structs, recovered from MOTU's own 2025 binary.
 
 ## The key trick
 
@@ -75,8 +83,10 @@ first the card pointer stays NULL forever.
 ```
 docs/    HALPLUGIN-API.md  API map + how to reach it
          CHANNEL-STATE.md  channel state, options, commit semantics (from MOTU's own console)
-         ORIGINAL-UI.md    what MOTU's apps are, and what was captured from Mojave
+         ORIGINAL-UI.md    what MOTU's apps are, what was captured, and why they do/don't run
          CUEMIX-PLAN.md    CueMix FX, stage by stage
+         CUEMIX-API.md     CueMix slots, arg order, value laws, meter structs (card level)
+         CUEMIX-OSC.md     CueMix FX's OSC server, address tree, subscriptions (app level)
          reference/        screenshots of MOTU's originals running on Mojave
 src/common/               shared card access (motu_card.h/.mm), prefs reader, motu-dump/probe
 src/motu-spy/             MotuSpy (runs on Mojave: snapshot + diff card state) and bounds probe
@@ -84,6 +94,9 @@ src/cuemix-fx/            JUCE app
 src/pci-audio-setup/      JUCE app
 third_party/JUCE          submodule, kcoul/JUCE
 tools/   build.sh, coreaudio-trace.c, vtdump.py, entitlements.plist
+         sign-identity.sh  picks the signing cert; shared with CMakeLists.txt
+         dis-cuemix.sh     disassemble MOTU's CueMix FX (unstripped, has the PCI back end)
+         osc-log.py        log/probe CueMix FX's OSC interface
 ```
 
 ## Building
@@ -97,7 +110,8 @@ Must be a real `.app` bundle running `NSApplication` and signed with
 `com.apple.security.device.audio-input` — a bare CLI never gets the card
 pointer. `tools/build.sh` handles bundling and ad-hoc signing.
 
-JUCE builds need CMake, which is **not currently installed** (`brew install cmake`).
+JUCE builds need CMake, which is installed (see `docs/NEXT-STEPS.md` for the
+exact invocation — `DEVELOPER_DIR` must point at the Command Line Tools).
 
 ## Requirements
 

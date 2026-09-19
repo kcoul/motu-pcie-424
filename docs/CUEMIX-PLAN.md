@@ -11,8 +11,10 @@ changes the card the way MOTU's app does. Match the layout, and add a classic
 ## What we are replacing
 
 From `docs/reference/cuemix-*.png`, `LocalizableStrings.xml` and the binary
-(i386, stripped; AwesomeLib drawing through Carbon, backend
-`Source/Device/CoreDeviceAW.cpp` for PCI cards):
+(the Mojave-era copy is i386, stripped, AwesomeLib drawing through Carbon;
+backend `Source/Device/CoreDeviceAW.cpp` for PCI cards). **A 2025 universal
+build of CueMix FX 1.6 is installed on the M4 and is not stripped, with the PCI
+back end intact — see `CUEMIX-API.md`, which supersedes several rows below.**
 
 **Console window**, titled after the card:
 
@@ -56,10 +58,10 @@ the FireWire/USB FX boxes.
 |---|---|
 | `CueMix` API (32 slots): input mute/trim, per-bus solo/mute/volume/pan, bus mute/volume/solo, balance/width, resources | wrapped, **no semantics verified** |
 | `Talkback` API (20 slots) | wrapped, unverified |
-| `ReadLevelMeters` (slot 21) | **not wrapped**; request/result structs unknown |
+| `ReadLevelMeters` (slot 21) | not wrapped; **request/result structs recovered** in `CUEMIX-API.md` |
 | Bus numbering | **found (read-only bounds probe, Sequoia):** a bus is an *output pair*, numbered by its left output id: 48 buses, 0, 2, … 94. Odd numbers and ≥ 96 raise `CueMixAPIImpl.cpp:49`. Strip channels are card-wide input ids 0–95 (past that raises `:42`) |
-| How a mix is assigned to an OUTPUT, and what "Mix N" in the MIX popup maps to | unknown; the bus *is* an output pair, so the popups may just pick which bus to view |
-| Value encodings | observed defaults, dB law unknown: volume 32768 (≈ 0 dB; 24320 and 32256 also seen), pan 0–128 centre 64, trim 64, balance/width 64, talkback input 4095 = Disabled, talkback/listenback outputs 0–47 (one per bus) |
+| How a mix is assigned to an OUTPUT, and what "Mix N" in the MIX popup maps to | **found:** a mix is an index 0–47 and the bus id is `2 × mix`; see `CUEMIX-API.md` |
+| Value encodings | **laws recovered** in `CUEMIX-API.md` (fader is 40·log10, quantized to multiples of 256; trim is per-channel min/max). Observed defaults: volume 32768 (≈ 0 dB; 24320 and 32256 also seen), pan 0–128 centre 64, trim 64, balance/width 64, talkback input 4095 = Disabled, talkback/listenback outputs 0–47 (one per bus) |
 | **Unchecked getters** | `GetCueMixInputBalance` / `Width` / `BalanceWidthPref` / `InputChannelMapping` do no bounds check and **segfault** on a bad bus (seen at bus 150). Only call them with indexes a checked getter accepted |
 | CueMix state persistence | the driver's `PCI-424.bus<N>.slot0.CueMix.plist` (`CueMixSettings`, 18816-byte blob) and `CueMixStereo.plist` (14208 bytes) |
 | App preferences | `com.motu.CueMixFX.plist` (`PeakHoldTime`, `HWFollowsConsole`, scope and OSC state, control surfaces) |
@@ -174,8 +176,10 @@ checked.
 - Everything polls the card at 10 Hz, so changes made elsewhere show.
 - Hovering a strip names it in the LCD.
 
-Not written yet: any control. Fader dB (20·log10(v/32768)), pan (v−64) and trim
-(v−64) displays are placeholders until stage 1 verifies the laws. There are no
+Not written yet: any control. The display laws are now known — fader dB is
+**40**·log10(v/32768), pan is v−64, and trim is *not* v−64 but a per-channel
+min/max range (`CUEMIX-API.md`); the code still carries the old placeholders.
+There are no
 meters yet.
 
 - A JUCE window with one strip per active input, bound to the card: trim,

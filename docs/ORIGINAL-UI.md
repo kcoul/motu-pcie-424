@@ -26,6 +26,85 @@ neither survives on modern macOS regardless of architecture, and why "port it to
 AppKit so it looks native" is the wrong instinct — neither app ever used a
 single stock control.
 
+> This holds for the 1.5 / 73220-era binaries above. It is **no longer true of
+> CueMix FX**: the 2025 universal build carries a `ViewMacCocoa` renderer, binds
+> no Carbon symbols at all (Carbon.framework is a vestigial load command), and
+> has no `AwesomeLib/Source/...` paths left in it. MOTU ported AwesomeLib's
+> drawing layer to Cocoa. PCI Audio Setup 1.5 was never rebuilt and is still
+> i386 PowerPlant, so it stays dead. See `CUEMIX-API.md`.
+
+## Why the originals do not run — what is ruled out
+
+Measured on this Intel iMac19,2 (Sequoia 15.7.4, build 24G517) on 2026-09-18,
+with CueMix FX 1.6 b5003c51d and an UltraLite mk3 Hybrid attached.
+
+**CueMix FX runs on Sequoia.** It was up for 36 minutes while this was written,
+driving the UltraLite, with its OSC server listening on UDP 63759. So the app
+itself is not blocked by the OS, the toolkit, or its own signing.
+
+Every explanation that has been offered for it so far is now eliminated:
+
+| Theory | Verdict | Evidence |
+|---|---|---|
+| Draws through Carbon, so it cannot survive modern macOS | **wrong for this build** | no `AwesomeLib/…MacCarbon.cpp` paths, a `ViewMacCocoa` renderer instead, and **zero Carbon symbols bound** (Carbon.framework is a vestigial load command) |
+| The app is not notarized / not signed | **wrong** | `spctl`: *accepted, source=Notarized Developer ID*; hardened runtime (`flags=0x10000(runtime)`), `Developer ID Application: MOTU (KRCLLMGZ2D)` |
+| Library validation blocks the HAL plugin from loading into a hardened app | **wrong** | the PCI `HALPlugin.bundle` is signed by the **same** Team ID `KRCLLMGZ2D`, `codesign -v` reports *valid on disk* and *satisfies its Designated Requirement* |
+| The in-process HAL plugin model is dead on modern macOS | **wrong** | `lsof` on the live process shows `MOTUFireWireAudio.kext/…/FWHALPlugin` loaded **into CueMix FX itself**, alongside Apple's own `AppleHDAHALPlugIn`. No MOTU plugin is in `coreaudiod` — these are old-style in-process `AudioHardwarePlugIn`s, and they still work |
+| MOTU kexts will not load on Sequoia | **wrong** | `kextstat`: `com.motu.driver.FireWireAudio (1.6 b5003c51d)` is loaded |
+| The PCI kext is unsigned or unnotarized | **wrong** | kext and plugin both carry `Developer ID Application: MOTU (KRCLLMGZ2D)` |
+| CueMix FX never learned the run-loop trick | **wrong** | it does exactly what we do: `HardwarePnPListener::HardwarePnPListener()` calls `AudioHardwareSetProperty('rnlp', …)` then `AudioHardwareAddPropertyListener('dev#')`, and `HardwarePnPListener::GetAvailableDevices()` fetches `'Mapi'`. `src/common/motu_card.mm:276` already said so |
+| Version skew: the 2025 console asks the 2017 plugin for the wrong Gestalt version | **not supported** | `GetAvailableDevices` has two `'Mapi'` fetches, one passing **10** and one passing **14**. The 2017 PCI plugin requires 14 (`cmpl $0xe`), and a version-14 path exists |
+
+The remaining difference is narrow and real: MOTU's console reaches `'Mapi'`
+through the **pre-10.6 CoreAudio API** — `AudioDeviceGetProperty` /
+`AudioDeviceGetPropertyInfo` / `AudioHardwareSetProperty`, with no `AudioObject*`
+import anywhere — while `motu_card.mm` uses the modern `AudioObjectGetPropertyData`
+family. Both end at the same plugin. Whether the legacy path still delivers a
+custom property to a **10.6-SDK** in-process plugin on Sequoia is the open
+question, and it **cannot be settled without the card**: everything above was
+measured against the FireWire plugin, which is a 2025 rebuild (`macosx15.4` SDK,
+x86_64 + arm64), whereas the PCI plugin is frozen at `macosx10.6`, i386 + x86_64.
+
+So the ten-minute test at the studio is precise: launch MOTU's CueMix FX with the
+card present and find out whether `GetAvailableDevices` returns the PCI device at
+all. If it does and the app still exits, the cause is downstream of discovery.
+
+### Architecture constraint
+
+`HALPlugin` is **i386 + x86_64, with no arm64 slice**, and it loads into the
+client process. So the replacement apps can only ever be x86_64 — already pinned
+in `CMakeLists.txt:15` — and MOTU's own arm64-capable CueMix FX could never
+reach a PCI-424 on an Apple Silicon Mac. The PCI control machine has to stay
+Intel.
+
+### The Big Sur volume
+
+Checked read-only, because it was mounted: **the Big Sur volume never had the PCI
+driver at all.**
+
+```
+/Volumes/macOS Big Sur - Data/Library/Extensions
+    MOTUFireWireAudio.kext      1.6 88494
+    MOTUMicroBookAudio.kext
+    (no MOTUPCIAudio.kext)
+```
+
+and its `com.motu.CueMixFX.plist` references exactly one engine —
+`com_motu_driver_FWA_Engine:00000d2f76`, the same UltraLite mk3 Hybrid serial as
+this Sequoia install. There is no PCI-424 state on that volume and never was.
+
+So CueMix FX on Big Sur was driving the UltraLite, which is what it is doing on
+Sequoia right now. **Big Sur offers this project nothing that Sequoia does not**,
+and nothing about the PCI path can have been broken there, because the PCI driver
+was never installed.
+
+What did change on the Sequoia side: a **2025 MOTU package** was installed here,
+taking `MOTUFireWireAudio.kext` and `CueMix FX` to `1.6 b5003c51d`. Big Sur still
+has the matched `1.6 88494` pair. The 2025 package does **not** ship a PCI driver
+— `MOTUPCIAudio.kext` here is still `1.6 73220` from 2017 — so MOTU has dropped
+PCI from the current installer, and the version mismatch between a 2025 console
+and a 2017 PCI plugin is a property of this machine's install, not a mistake.
+
 ## MOTU PCI Audio Setup
 
 | | |
@@ -84,6 +163,7 @@ Control inventory, from strings in the binary:
 | | |
 |---|---|
 | Mojave copy | i386, 1.6 **73220**, Cocoa shell (`NSPrincipalClass=NSApplication`) |
+| 2025 copy | **arm64 + x86_64, 1.6 b5003c51d, not stripped, PCI back end present** — `CUEMIX-API.md` |
 | Bundle ID | `com.motu.CueMixFX` |
 | Nibs | `CueMixFXCocoa.nib` + `CueMix.nib` — **menu bar only**, 4–6 KB |
 
@@ -192,8 +272,9 @@ instead:
 - **Peak Hold Time ▸** (submenu would not open): `Off`, `2 Seconds`,
   `4 Seconds`, `10 Seconds`, `1 Minute`, `5 Minutes`, `Infinite`. This is the
   order in the strings file. `com.motu.CueMixFX.plist` on Mojave holds
-  `PeakHoldTime = 3`, which would be *10 Seconds* if that order is the menu
-  order (unverified).
+  `PeakHoldTime = 3`. The enum is 1-based over exactly that order, so 3 is
+  **4 Seconds** — decoded from `ConvertPeakHoldTimeEnumToSeconds`, see
+  `CUEMIX-API.md`. Infinite is carried as −1 seconds.
 - **Phones**: the only strings are `Follow Active Mix` and the phones output
   names (`Phones 1-2`, `Phones Out 1/2`). PCI interfaces have no phones bus, so an
   empty menu is almost certainly correct behaviour, not a capture failure. The
