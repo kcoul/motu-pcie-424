@@ -190,13 +190,59 @@ sudo ditto "Applications/CueMix FX.app" "/Applications/CueMix FX.app"
 ```
 
 `Common.pkg` contains only `/Applications/CueMix FX.app` and `/Library/Audio`.
-Note the 1.6 installer has **no PCI package at all** — only MicroBook and
-FireWire/USB/Thunderbolt. MOTU dropped PCI driver support long ago, yet the app
+Note the 2025 installer has **no PCI package at all** — only MicroBook and
+FireWire/USB/Thunderbolt (the 2021 build 89555 has none either). Yet the app
 binary still carries the whole PCI back end (`CoreDeviceAW.cpp`), which is what
 made the decode in `CUEMIX-API.md` possible.
 
 There is a newer **1.7+11ea3df24** (Jan 13 2026, `download/2949`). Prefer 1.6
 while `CUEMIX-API.md` is the reference, so slots and line numbers match.
+
+### Where the PCI driver itself comes from
+
+**The PCI driver is still downloadable from MOTU** — it is just not on the
+PCIe-424 card's own page. It lives on the *interface* product pages, behind
+pagination that the default view hides:
+
+```
+HD192     motu.com/en-us/download/product/10/?details=true&platform_family=mac&page=N
+2408mk3   .../product/11/     24I/O   .../product/12/
+PCIe-424  .../product/400/    <- card page: user guides and TouchOSC only, no driver
+```
+
+The one that matters:
+
+```
+MOTU Audio Installer 1.6 (73220), July 1 2017
+  https://motu.com/en-us/download-center/download/103
+  -> cdn-data.motu.com/downloads/audio/driver/170731/MOTU Audio Installer 1.6 (73220).pkg
+  contains PCI_and_PCI_Express_Drivers.pkg:
+      /Library/Extensions/MOTUPCIAudio.kext        (HALPlugin.bundle inside)
+      /Applications/MOTU PCI Audio Setup.app
+      /Applications/MOTU PCI SMPTE Setup.app
+      /System/Library/Extensions
+```
+
+**73220 is exactly the build installed on the studio machine.** Verified
+2026-09-19 by extracting the package and comparing against `/Library/Extensions`:
+
+```
+IDENTICAL  Contents/MacOS/MOTUPCIAudio                      a5188656...3cb8a668
+IDENTICAL  Contents/PlugIns/.../MacOS/HALPlugin             2c8233f4...5416e64d
+```
+
+So the installed driver is a pristine MOTU original, and a clean copy is a
+download away. No local archive is needed, though `docs/HALPLUGIN-API.md` and
+`CUEMIX-API.md` both assume *this* build.
+
+Prior art for the install procedure, and the origin of the Pacifist route:
+`bassdress.com/blog/2020/11/21/motu-24i-o-and-pci-drivers-on-catalina-big-sur/`
+— extract `PCI_and_PCI_Express_Drivers.pkg` from 73220, take `CueMix FX.app`
+from a later build. Note that post targets Catalina/Big Sur and calls for
+`sudo mount -uw /` and disabling SIP, both of which were needed to write to
+`/System/Library/Extensions`. **Neither is needed here**: on Sequoia the kext
+lives in `/Library/Extensions`, and this project's whole point is that the card
+is reachable with **SIP fully enabled**.
 
 ### Two shell gotchas on this machine
 
