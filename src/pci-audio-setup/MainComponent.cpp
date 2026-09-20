@@ -127,7 +127,9 @@ juce::String MainComponent::prefsKey(const juce::String& name) const {
 void MainComponent::report(const juce::String& what, const motu::Exception& e) {
     if (!e.raised()) return;
     juce::Logger::writeToLog(what + ": " + juce::String(e.str()));
-    if (onError) onError(what + "\n\nThe driver has reported an error.\n" + juce::String(e.str()));
+    // e.message() is MOTU's own wording, including the right article and the
+    // per-domain code formatting (hex for kernel, four-char code for HAL).
+    if (onError) onError(what + "\n\n" + juce::String(e.message()));
 }
 
 // --- reading -----------------------------------------------------------------

@@ -70,9 +70,67 @@ bool Exception::raised() const {
     return false;
 }
 
-int Exception::kind() const { int v; std::memcpy(&v, raw + 0, 4); return v; }
-int Exception::code() const { int v; std::memcpy(&v, raw + 4, 4); return v; }
-int Exception::line() const { int v; std::memcpy(&v, raw + 8, 4); return v; }
+int Exception::errorCode() const { int v; std::memcpy(&v, raw + 0, 4); return v; }
+int Exception::domain()    const { int v; std::memcpy(&v, raw + 4, 4); return v; }
+int Exception::line()      const { int v; std::memcpy(&v, raw + 8, 4); return v; }
+
+Exception::Domain Exception::domainKind() const {
+    const int d = domain();
+    // MOTU's jump table covers 0..5 and sends everything else to Unknown.
+    if (d < 0 || d > 5) return Domain::Unknown;
+    return static_cast<Domain>(d);
+}
+
+std::string Exception::domainName() const {
+    switch (domainKind()) {
+        case Domain::OS:     return "OS error";
+        case Domain::HAL:    return "HAL error";
+        case Domain::Kernel: return "kernel error";
+        case Domain::MOTU:   return "MOTU error";
+        case Domain::Unix:   return "Unix error";
+        case Domain::Unknown: break;
+    }
+    return "unknown error";
+}
+
+std::string Exception::errorCodeString() const {
+    const int c = errorCode();
+    char b[32];
+    switch (domainKind()) {
+        case Domain::Kernel:
+            // MOTU prints kernel codes with %x.
+            std::snprintf(b, sizeof b, "0x%x", (unsigned)c);
+            return b;
+        case Domain::HAL: {
+            // MOTU prints HAL codes with %-*.*s: the value is an OSStatus
+            // four-character code, which is meaningless in decimal. Fall back
+            // to decimal if it is not printable.
+            const char cc[4] = { (char)((c >> 24) & 0xff), (char)((c >> 16) & 0xff),
+                                 (char)((c >> 8) & 0xff),  (char)(c & 0xff) };
+            bool printable = true;
+            for (char ch : cc) if (ch < 0x20 || ch > 0x7e) printable = false;
+            if (printable) {
+                std::snprintf(b, sizeof b, "'%c%c%c%c'", cc[0], cc[1], cc[2], cc[3]);
+                return b;
+            }
+            break;
+        }
+        default: break;
+    }
+    std::snprintf(b, sizeof b, "%d", c);
+    return b;
+}
+
+std::string Exception::message() const {
+    if (!raised()) return "ok";
+    char b[512];
+    std::snprintf(b, sizeof b,
+                  "The driver has reported %s%s.\n\nErrorCode %s in File %s line %d",
+                  // MOTU writes "an OS error" / "an unknown error", "a MOTU error".
+                  (domainKind() == Domain::OS || domainKind() == Domain::Unknown) ? "an " : "a ",
+                  domainName().c_str(), errorCodeString().c_str(), file().c_str(), line());
+    return b;
+}
 
 std::string Exception::file() const {
     const char* f = (const char*)raw + 12;
@@ -85,8 +143,9 @@ std::string Exception::file() const {
 std::string Exception::str() const {
     if (!raised()) return "ok";
     char b[256];
-    std::snprintf(b, sizeof b, "kind=%d code=%d at %s:%d",
-                  kind(), code(), file().c_str(), line());
+    std::snprintf(b, sizeof b, "%s, ErrorCode %s at %s:%d",
+                  domainName().c_str(), errorCodeString().c_str(),
+                  file().c_str(), line());
     return b;
 }
 

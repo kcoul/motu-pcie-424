@@ -113,7 +113,7 @@ private:
         if (!e.raised()) card_.commitChanges(e, true);
         if (e.raised())
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "MOTU Channel Names",
-                                                   "The driver has reported an error.\n" + juce::String(e.str()));
+                                                   juce::String(e.message()));
         c.custom = juce::String(card_.channelName(e, c.id, isInput_));
         table_.repaintRow(row);
         if (changed_) changed_();

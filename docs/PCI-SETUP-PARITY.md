@@ -82,21 +82,52 @@ Extracted from the i386 binary and matched against `src/pci-audio-setup/`.
 
 ## Gaps worth closing
 
-### 1. Driver error reporting — the real one
+### 1. Driver error reporting — solved and implemented
 
-MOTU translated a driver exception into a sentence. We print the raw fields:
+**Two of our fields were the wrong way round.** The exception record was decoded
+by probing, which cannot distinguish two adjacent small integers. MOTU's app
+settles it: it **switches on `+0x04`** to choose the category and **prints
+`+0x00` as "ErrorCode"**. We had them swapped.
 
 ```
-ours:   The driver has reported an error.  kind=3 code=4 at AudioWireCardImpl.cp:470
-MOTU's: The driver has reported a MOTU error.
-        an inactive input was specified in a call to the MOTU PCI Audio driver
-        ErrorCode 4 in File AudioWireCardImpl.cp line 470
+     0x00  int32   errorCode     <- was documented as "kind"
+     0x04  int32   domain        <- was documented as "code"
+     0x08  int32   line
+     0x0c  char[]  file
 ```
 
-Everything needed is already carried on `motu::Exception` (`kind()`, `code()`,
-`file()`, `line()`); only the mapping is missing. Two parts:
+That also explains an anomaly the old notes recorded and could not account for:
+a bad *input* index gave "kind=3" and a bad *output* index "kind=2", which are
+not plausible as domains. Read correctly, **both are domain 4 (MOTU)** with
+error codes 3 and 2 — exactly right for two bad-index calls into one driver.
 
-**a. Category, from `kind`.** Six exist, and they are *not* formatted alike:
+#### The domain mapping
+
+From `AWConfigPane::LoadConfig()`, a jump table of six indexed by `+0x04`:
+
+```
+11035: cmpl $0x5, 0x4(%esi)          ; domain
+1103f: ja   0x111d3                  ; > 5 -> unknown
+11048: movl 0x4d3(%ebx,%eax,4), %eax ; jump table
+11051: jmpl *%eax
+```
+
+| domain | category |
+|---|---|
+| 0 | unknown error |
+| 1 | OS error |
+| 2 | HAL error |
+| 3 | kernel error |
+| 4 | MOTU error |
+| 5 | Unix error |
+| > 5 | unknown error |
+
+Confirmed independently in `AWConfigPane::SaveConfig()`, whose own jump table
+(at `ebx+0x5c5`) yields the same six branches in the same order. The literal
+pool order — unknown, Unix, MOTU, kernel, OS, HAL — is **not** the enum order,
+which is why reading it off the strings would have been wrong.
+
+#### The code is formatted per domain
 
 | category | ErrorCode printed as |
 |---|---|
@@ -104,22 +135,31 @@ Everything needed is already carried on `motu::Exception` (`kind()`, `code()`,
 | kernel | `%x` **hex** |
 | HAL | `%-*.*s` — a **four-character code**, as text |
 
-The HAL case matters: those are `OSStatus` four-char codes, unreadable as
-integers.
+The HAL case matters: those are `OSStatus` four-char codes and read as gibberish
+in decimal. `Exception::errorCodeString()` follows this, falling back to decimal
+when the four bytes are not printable.
 
-**b. Message, from `code`.** `STR# 1026` holds all 19, e.g. *"the MOTU PCI Audio
-card is currently in use by another application. Quit the other app and try
-again"* — newly relevant now that a working CueMix FX can hold the card.
+#### Implemented
 
-**Still unknown: the numbering of `kind`.** The six literals are pooled in the
-binary as unknown, Unix, MOTU, kernel, OS, HAL, but pool order is not
-necessarily enum order. Observed on real hardware:
-`GetInputDescription(9999)` → `kind=3 code=4`, `GetOutputDescription(9999)` →
-`kind=2 code=4`. Both are bad-index errors from the same driver, so a naive
-"kind = domain" reading does not obviously hold, and `code=4` does not line up
-with `STR# 1026`'s entries 10/11 for inactive input/output either. **Trace this
-in the i386 binary before implementing** — guessing would produce confidently
-wrong error messages, which is worse than the raw fields we print now.
+`motu::Exception` now has `errorCode()`, `domain()`, `domainKind()`,
+`domainName()`, `errorCodeString()` and `message()`, and both apps show MOTU's
+sentence. Verified on the card:
+
+```
+GetInputDescription(9999)   MOTU error, ErrorCode 3 at AudioWireCardImpl.cpp:470
+  raw  03 00 00 00 | 04 00 00 00 | d6 01 00 00 | "AudioWireCardImpl.cp"
+       errorCode=3   domain=4      line=470
+```
+
+#### Still open: `STR# 1026` is a different enum
+
+The 19 driver messages are **not** indexed by this `errorCode`. Codes 3 and 2
+above would map to *"no MOTU PCI Audio cards were found"* and *"an unknown
+client ID was passed"*, which is plainly wrong for a bad array index. That list
+belongs to another error path — most likely driver open/connect, where
+*"the MOTU PCI Audio card is currently in use by another application"* would
+make sense. Worth tracing separately; that message is newly reachable now that a
+working CueMix FX can hold the card.
 
 ### 2. Conditional and failure messages we do not show
 

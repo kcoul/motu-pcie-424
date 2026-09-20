@@ -41,13 +41,23 @@
 namespace motu {
 
 // MOTU's exception record: a 144-byte buffer the caller supplies, which the
-// plugin fills in when a call fails. Undocumented, but recovered by probing
-// (see tools' MOTUException section and docs/HALPLUGIN-API.md):
+// plugin fills in when a call fails.
 //
-//     0x00  int32   kind       error domain
-//     0x04  int32   code       domain-specific code
+//     0x00  int32   errorCode  domain-specific code
+//     0x04  int32   domain     which error domain -- see Domain below
 //     0x08  int32   line       source line inside the driver
 //     0x0c  char[]  file       NUL-terminated source file, e.g. "AudioWireCardImpl.cp"
+//
+// **The first two fields were documented the wrong way round until 2026-09-19.**
+// They were recovered by probing, which could not tell them apart: both look
+// like small integers. MOTU's own PCI Audio Setup settles it -- it switches on
+// the field at **+0x04** to pick the error category, and prints the field at
+// **+0x00** as "ErrorCode". See docs/PCI-SETUP-PARITY.md for the disassembly.
+//
+// That correction also explains an anomaly in the old notes: a bad *input*
+// index recorded "kind=3" and a bad *output* index "kind=2", which made no
+// sense as domains. Read correctly, both are domain 4 (MOTU) with error codes
+// 3 and 2 -- exactly what two bad-index calls into the same driver should give.
 //
 // A successful call leaves the buffer untouched, so `raised()` is just "did the
 // plugin write anything".
@@ -55,16 +65,34 @@ struct Exception {
     static constexpr int kSize = 144;
     alignas(8) unsigned char raw[kSize];
 
+    // The switch in AWConfigPane::LoadConfig/SaveConfig, jump table of 6 with
+    // anything above 5 falling through to Unknown.
+    enum class Domain { Unknown = 0, OS = 1, HAL = 2, Kernel = 3, MOTU = 4, Unix = 5 };
+
     Exception() { reset(); }
     void reset();
 
     bool raised() const;
-    int  kind() const;
-    int  code() const;
+    int  errorCode() const;      // +0x00, printed as "ErrorCode"
+    int  domain() const;         // +0x04, raw; may exceed 5
+    Domain domainKind() const;   // +0x04, clamped the way MOTU clamps it
     int  line() const;
     std::string file() const;
 
-    // "kind=3 code=4 at AudioWireCardImpl.cp:470", or "ok".
+    // "MOTU error", "HAL error", ... -- MOTU's own wording.
+    std::string domainName() const;
+
+    // The error code as MOTU formats it for this domain: decimal normally,
+    // hex for Kernel, and a four-character code for HAL (where the value is an
+    // OSStatus and reads as gibberish in decimal).
+    std::string errorCodeString() const;
+
+    // MOTU's sentence, near enough verbatim:
+    //   "The driver has reported a MOTU error.
+    //    ErrorCode 3 in File AudioWireCardImpl.cp line 470"
+    std::string message() const;
+
+    // "MOTU error, ErrorCode 3 at AudioWireCardImpl.cp:470", or "ok".
     std::string str() const;
     std::string hex() const;   // first 32 bytes, for decoding new fields
 };
