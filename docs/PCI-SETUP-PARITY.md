@@ -186,6 +186,29 @@ whole of MOTU's error reporting on OS X, and we now match it. Do not implement
 `STR# 1026`: its text describes a system that has not existed for twenty years,
 and a message like *"quit the other app"* would be actively misleading.
 
+### Verified: the control API is shared, not exclusive
+
+Re-signing CueMix FX created a failure mode that could not exist before — two
+apps driving the card at once. Checked on 2026-09-19 with MOTU's CueMix FX
+running and the audio engine live (`IOAudioEngineState = 1`, one client):
+
+- `MotuDump` read the whole card — device, clock sources, all four interfaces,
+  channels, names, sub-APIs — with no exception raised;
+- our PCI Audio Setup launched alongside it, loaded `HALPlugin` cleanly and
+  stayed up, with nothing in the log.
+
+So the HAL plugin's control API is shared. There is no lock to contend for and
+no need to quit one app to run the other.
+
+This also retires MOTU's *"the MOTU PCI Audio card is currently in use by
+another application. Quit the other app and try again"* — which we were never
+going to implement anyway (see `STR# 1026` above), and which describes a
+restriction this driver does not impose on the control path.
+
+Not covered by this: the **audio engine** itself. Streaming is a separate
+concern from control, and nothing here says two clients can open the engine at
+once.
+
 ### 2. Conditional and failure messages we do not show
 
 - `(AES/EBU not available at %d Hz)` — shown against the AES options when the
