@@ -37,7 +37,7 @@ Parsed with a small reader (26 resource types). Useful:
 |---|---|
 | `MENU` | **File**: Save Configuration ⌘S, Load Configuration ⌘O, Refresh ⌘R, Close ⌘W |
 | `WIND` | `128 "Console Main Window"`, `130 "Splash"` |
-| `STR# 1026` | the 19 driver error messages, verbatim |
+| `STR# 1026` | 19 driver error messages — **vestigial, never read**; see below |
 | `STR# 27545` | the UI vocabulary and two format strings |
 | `DITL`/`ALRT` | almost entirely PowerPlant boilerplate |
 
@@ -151,15 +151,40 @@ GetInputDescription(9999)   MOTU error, ErrorCode 3 at AudioWireCardImpl.cpp:470
        errorCode=3   domain=4      line=470
 ```
 
-#### Still open: `STR# 1026` is a different enum
+#### Closed: `STR# 1026` is dead code
 
-The 19 driver messages are **not** indexed by this `errorCode`. Codes 3 and 2
-above would map to *"no MOTU PCI Audio cards were found"* and *"an unknown
-client ID was passed"*, which is plainly wrong for a bad array index. That list
-belongs to another error path — most likely driver open/connect, where
-*"the MOTU PCI Audio card is currently in use by another application"* would
-make sense. Worth tracing separately; that message is newly reachable now that a
-working CueMix FX can hold the card.
+The 19 driver messages looked like the obvious companion to `errorCode`, and
+they are not. **Nothing reads that list.**
+
+Every `GetIndString` call in the binary was checked. All twelve with a literal
+list ID use **27545**, the UI vocabulary:
+
+```
+UpdateStatusLine        27545[13]   "PCI Use: ... MB per sec."
+MakeBankName            27545[6]    "Bank"
+AddNonRoutingChannel    27545[9,10,11]   Enable / Input / Output
+AddRoutingChannel       27545[9,10,11,12]
+AddItemsForBank         27545[14]   "Disable"
+```
+
+The only other three are PowerPlant framework internals —
+`LAction::GetDescription` and `LApplication::FindCommandStatus` — which take
+their list ID from an object field and serve the undo/redo lists (150–157, 220).
+
+The content confirms it. These are **classic Mac OS** messages:
+
+> *"…make sure there is ONE copy of the latest version in the MOTU sub-folder of
+> the **Extensions folder**"*
+> *"Shut down, check that the card is correctly seated and reboot"*
+
+The fork also carries a `ckid` resource, a CodeWarrior version-control artifact.
+`STR# 1026` is a leftover from the OS 9 build that was never stripped when the
+app was carried to OS X.
+
+**So there is no second error enum.** The domain + `errorCode` path above is the
+whole of MOTU's error reporting on OS X, and we now match it. Do not implement
+`STR# 1026`: its text describes a system that has not existed for twenty years,
+and a message like *"quit the other app"* would be actively misleading.
 
 ### 2. Conditional and failure messages we do not show
 
