@@ -1,12 +1,30 @@
 # Classic skin sprites
 
-MOTU's own CueMix FX artwork: the Legacy/PCI subset of the 145 PNGs in
-`CueMix FX.app/Contents/Resources` (1.6 73220), copied unmodified. These are
-only the sprites `src/cuemix-fx/ClassicConsole.cpp` draws.
+**No artwork ships here.** The Classic skin draws MOTU's own sprites, which are
+MOTU's copyright and are not redistributed by this project. The 24 PNGs that
+used to sit in this directory were removed on 2026-09-19, before the repository
+was made public, and `.gitignore` keeps them out.
 
-The app looks here first (walking up from the build tree), then inside any
-original `CueMix FX.app` it can find, or wherever *View > Locate MOTU CueMix
-FX.app…* points.
+**Nothing needs doing to make Classic work.** The app already looks for the
+artwork in your own installed copy, in this order:
+
+1. whatever *View > Locate MOTU CueMix FX.app…* was last pointed at;
+2. `Contents/Resources/classic` inside our own bundle;
+3. `assets/classic` here, if you have put the PNGs back yourself;
+4. `/Applications/CueMix FX.app/Contents/Resources`, and the same under
+   `~/Applications`;
+5. any mounted volume with a `CueMix FX.app` in its `Applications`.
+
+So installing MOTU's CueMix FX — which is worth doing anyway, since it runs
+again after a one-line re-sign (`docs/ORIGINAL-UI.md`) — is all that is needed.
+`ClassicSkin::isUsable` probes for `BackgroundRightPCI.png`. Without it the
+Classic menu item is simply disabled and the Modern skin, which is our own
+artwork, is used instead.
+
+The sprites the console actually draws are the Legacy/PCI subset of the 145 PNGs
+in `CueMix FX.app/Contents/Resources` (verified against 1.6 b5003c51d; all 24
+are present there). The geometry below is this project's own reverse
+engineering and is what the drawing code relies on.
 
 Sheets are equal frames laid out row by row:
 
