@@ -104,6 +104,7 @@ docs/    HALPLUGIN-API.md  API map + how to reach it
          CUEMIX-API.md     CueMix slots, arg order, value laws, meter structs (card level)
          CUEMIX-OSC.md     CueMix FX's OSC server, address tree, subscriptions (app level)
          PCI-SETUP-PARITY.md  MOTU's original Setup app, read out of its shipped binary
+         CUEMIX-STATUS.md  where the CueMix FX rebuild stopped, stage by stage
          reference/        screenshots of MOTU's originals running on Mojave
 src/common/               shared card access (motu_card.h/.mm), prefs reader, motu-dump/probe
 src/motu-spy/             MotuSpy (runs on Mojave: snapshot + diff card state) and bounds probe
