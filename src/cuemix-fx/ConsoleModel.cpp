@@ -39,16 +39,34 @@ int quantizeVolume(int raw) {
     return juce::jlimit(0, 32768, raw) >= 32768 ? 32768 : (juce::jlimit(0, 32768, raw) & 0xFF00);
 }
 
-// Pan and trim read as a signed offset with an explicit '+' when positive
-// (ValuePanLegacy / ValueLegacyTrim::GetUIStringWithHardwareValue). Pan is
-// centred on 64; trim is *not* offset -- its hardware value is the number
-// shown, over a per-channel range we have not read yet.
+// Pan reads as a signed offset with an explicit '+' when positive
+// (ValuePanLegacy), centred on 64.
 static juce::String signedText(int n) {
     return (n > 0 ? "+" : "") + juce::String(n);
 }
 
 juce::String panText(int raw) { return signedText(raw - 64); }
-juce::String trimText(int raw) { return signedText(raw); }
+
+// Trim on a PCI-424 is 64..255 on the wire and 0..+12 dB on screen. MOTU does
+// not use ValueLegacyTrim's own readout here: Device424::CreateTrimValue hands
+// the Value a StringDisplayScalerPrintf built with (64, 255, 0, 12) and the
+// format "%0.0f dB", and that scaler computes c + (hw-a)*(d-c)/(b-a).
+// See docs/CUEMIX-API.md, "Solved 2026-09-19".
+//
+// The earlier `v - 64` placeholder was wrong by the whole 191/12 scale factor,
+// which put a full-range trim at +191 dB.
+static constexpr int   kTrimMin = 64, kTrimMax = 255;
+static constexpr float kTrimMaxDb = 12.0f;
+
+float trimDb(int raw) {
+    return (raw - kTrimMin) * kTrimMaxDb / float(kTrimMax - kTrimMin);
+}
+
+juce::String trimText(int raw) {
+    // MOTU prints whole dB, and shows '+' for anything above unity.
+    const int db = (int)std::lround(trimDb(raw));
+    return (db > 0 ? "+" : "") + juce::String(db) + " dB";
+}
 
 ConsoleModel::ConsoleModel() {
     dev_ = motu::Card::findDevice();
@@ -389,7 +407,7 @@ void ConsoleModel::setLocal(Param p, int value, int strip) {
     auto onOff = [](int v) { return juce::String(v ? "on" : "off"); };
     juce::String title = isStrip ? strips_[(size_t)strip].channelName : juce::String(), what;
     switch (p) {
-        case Param::Trim:         what = "Trim " + juce::String(value - 64) + " dB"; break;
+        case Param::Trim:         what = "Trim " + trimText(value); break;
         case Param::InputMute:    what = "Input mute " + onOff(value); break;
         case Param::Stereo:       what = value ? "Stereo" : "Mono"; break;
         case Param::Volume:       what = "Fader " + volumeText(value); break;

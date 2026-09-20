@@ -321,7 +321,11 @@ ClassicConsole::Hit ClassicConsole::hitAt(juce::Point<int> p) const {
         const auto at = [&](int ax, int ay, int aw, int ah) { return juce::Rectangle<int>(x + ax, ay, aw, ah); };
 
         if (in(0, 3, 82, 20))    make(Kind::Toggle, P::InputMute, i, st.inputMute, at(0, 3, 82, 20));
-        else if (in(4, 28, 44, 44))  make(Kind::Knob, P::Trim, i, st.trim, at(4, 28, 44, 44), 64, 120, 64);
+        // Trim is 64..255 on the wire, 0..+12 dB on screen, centre (unity) at
+        // the bottom of the range rather than the middle -- it is gain-only.
+        // The 120 here was a guess before Device424::CreateTrimValue was read;
+        // see docs/CUEMIX-API.md, "Solved 2026-09-19".
+        else if (in(4, 28, 44, 44))  make(Kind::Knob, P::Trim, i, st.trim, at(4, 28, 44, 44), 64, 255, 64);
         else if (in(0, 79, 40, 20))  make(Kind::Toggle, P::Stereo, i, 0, at(0, 79, 40, 20));
         else if (in(40, 79, 40, 20)) make(Kind::Toggle, P::Stereo, i, 1, at(40, 79, 40, 20));
         else if (in(4, 155, 44, 38)) make(Kind::Knob, P::Pan, i, st.pan, at(4, 155, 44, 38), 0, 128, 64);
