@@ -30,6 +30,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <cctype>
 #include <set>
 #include <vector>
 
@@ -99,6 +101,26 @@ static void run() {
     for (size_t i = 0; i < chans.size(); ++i)
         P("  ch %2u  %s\n", chans[i], card.inputDescription(e, (int)chans[i]).c_str());
 
+    // The per-second preview can only fit a handful of columns. By default it
+    // shows the first strips, which on a full rig are whichever interface comes
+    // first -- not necessarily the ones with signal on them. MOTU_METERS_SHOW
+    // takes a comma-separated list of channel ids to watch instead.
+    std::vector<size_t> show;
+    if (const char* want = getenv("MOTU_METERS_SHOW"); want && *want) {
+        for (const char* s = want; *s; ) {
+            const unsigned id = (unsigned)strtoul(s, const_cast<char**>(&s), 10);
+            for (size_t i = 0; i < chans.size(); ++i)
+                if (chans[i] == id) { show.push_back(i); break; }
+            while (*s && !isdigit((unsigned char)*s)) ++s;
+        }
+    }
+    if (show.empty())
+        for (size_t i = 0; i < chans.size() && i < 12; ++i) show.push_back(i);
+
+    P("preview channels: ");
+    for (size_t i : show) P("%u ", chans[i]);
+    P("\n");
+
     const int seconds = envInt("MOTU_METERS_SECONDS", 10);
     const int hz = 20;
     P("\npolling %d Hz for %d s -- feed signal now, and clip something\n\n", hz, seconds);
@@ -107,6 +129,14 @@ static void run() {
     std::set<int> clipValues;
     bool tailEverSet = false, everRaised = false;
     int reads = 0, outOfRange = 0;
+
+    // The 40 tail bytes are undocumented. Capture the first non-zero snapshot,
+    // OR every byte together to see which offsets are ever used at all, and
+    // note whether the contents change between reads -- static bytes are
+    // probably a constant or a descriptor, changing ones are live data.
+    constexpr size_t kTail = sizeof(motu::CueMix::LevelMeterResults::tail);
+    unsigned char tailFirst[kTail] = {}, tailOr[kTail] = {};
+    bool tailCaptured = false, tailVaries = false;
 
     for (int frame = 0; frame < seconds * hz; ++frame) {
         motu::CueMix::LevelMeterResults res;
@@ -124,13 +154,34 @@ static void run() {
             if (v > peak[i]) peak[i] = v;
             if (res.clip[i]) clipValues.insert(res.clip[i]);
         }
-        for (unsigned char b : res.tail) if (b) { tailEverSet = true; break; }
+        bool tailSetThisRead = false;
+        for (size_t i = 0; i < kTail; ++i) {
+            tailOr[i] |= res.tail[i];
+            if (res.tail[i]) tailSetThisRead = true;
+        }
+        if (tailSetThisRead) {
+            tailEverSet = true;
+            if (!tailCaptured) {
+                std::memcpy(tailFirst, res.tail, kTail);
+                tailCaptured = true;
+            } else if (std::memcmp(tailFirst, res.tail, kTail) != 0) {
+                tailVaries = true;
+            }
+        }
 
         // One line a second, so the log stays readable but movement is visible.
+        // The four live tail slots ride along so they can be correlated against
+        // the channel levels in the same read.
         if (frame % hz == 0) {
             P("t=%2ds ", frame / hz);
-            for (size_t i = 0; i < chans.size() && i < 12; ++i)
+            for (size_t i : show)
                 P("%6d%s", res.level[i], res.clip[i] ? "*" : " ");
+            std::uint32_t t0, t1, t2, t3;
+            std::memcpy(&t0, res.tail + 0x00, 4);
+            std::memcpy(&t1, res.tail + 0x04, 4);
+            std::memcpy(&t2, res.tail + 0x10, 4);
+            std::memcpy(&t3, res.tail + 0x14, 4);
+            P("  | tail %6u %6u %6u %6u", t0, t1, t2, t3);
             P("\n");
         }
         usleep(1000000 / hz);
@@ -148,7 +199,30 @@ static void run() {
     P("clip values observed    : ");
     if (clipValues.empty()) P("none (nothing clipped)\n");
     else { for (int v : clipValues) P("%d ", v); P("\n"); }
-    P("tail bytes ever set     : %s\n", tailEverSet ? "YES -- undocumented output, dump it" : "no");
+    P("tail bytes ever set     : %s\n", tailEverSet ? "YES -- undocumented output" : "no");
+
+    if (tailEverSet) {
+        P("\n--- tail bytes (results +0x180, %zu bytes) ---\n", kTail);
+        P("contents %s between reads\n", tailVaries ? "CHANGE -- live data"
+                                                    : "are STATIC -- constant or descriptor");
+        auto hexdump = [&](const char* label, const unsigned char* b) {
+            P("%s\n", label);
+            for (size_t i = 0; i < kTail; i += 16) {
+                P("  +%03zx  ", 0x180 + i);
+                for (size_t j = 0; j < 16 && i + j < kTail; ++j) P("%02x ", b[i + j]);
+                P("\n");
+            }
+            P("    as u32: ");
+            for (size_t i = 0; i + 4 <= kTail; i += 4) {
+                std::uint32_t v;
+                std::memcpy(&v, b + i, 4);
+                P("%u ", v);
+            }
+            P("\n");
+        };
+        hexdump("first non-zero read:", tailFirst);
+        hexdump("OR of every read (which offsets are ever used):", tailOr);
+    }
     P("\nWrite the answers into docs/CUEMIX-API.md (\"Still needs the card\").\n");
 }
 

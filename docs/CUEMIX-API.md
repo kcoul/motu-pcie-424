@@ -574,8 +574,10 @@ Per polled frame MOTU then writes two parameters per channel: the clip float
 - **Where `flags & 0x10` gets set.** Until that is traced, we know writes are
   gated but not by what. Our own code will not have the gate; the risk is only
   that it encodes a condition we ought to respect.
-- **`GetCardType` on a PCIe-424** — decides 24 vs 48 meters. `motu-dump` already
-  calls it; the value just needs recording.
+- ~~**`GetCardType` on a PCIe-424**~~ — **answered 2026-09-19: `cardType = 2`,
+  so `maxLevelMeters = 48`.** Read off the studio card (HD192 + 2×24I/O +
+  2408mk3). Note 48 is *fewer than the rig's 68 active inputs*, so a full PCI
+  system cannot meter every input at once and the console must choose which 48.
 - **Trim's min/max for an AudioWire channel**, and how the card's `GetInputTrim`
   value relates to the `Value`'s hardware value.
 - **Which clip state is 1 and which is 2** — now answered by inference (see
@@ -585,10 +587,87 @@ Per polled frame MOTU then writes two parameters per channel: the clip float
   `CoreDeviceAW::UpdateLevelMeters`, and `LevelMeterSubsystemFX` — what a
   FireWire/USB interface runs through — contains no `0.5` immediate anywhere in
   its ~11 KB of code, so an UltraLite cannot show this state at all.
-- **The 32 bytes at `+0x180` of the results struct.**
+- ~~**The 32 bytes at `+0x180` of the results struct.**~~ — **largely answered
+  2026-09-19: they carry two stereo bus meters.** See "The results tail is bus
+  metering" below.
 - **Whether `DoesCueMixFaderHaveResources` ever refuses**, and where MOTU calls it.
 - **Everything about writes, end to end.** All of the above is MOTU's intent as
   compiled; none of it has moved a fader on a real PCI-424 yet.
+
+## The results tail is bus metering
+
+Measured 2026-09-19 on the studio PCIe-424 with `MotuMeters`, bus 0.
+
+MOTU's own code zeroes `results + 0x180` and never reads it back, so it was
+recorded here as unidentified. The card fills it anyway. Of the 40 bytes, **four
+`u32` slots are live and the remaining 24 are always zero**:
+
+| offset | contents |
+|---|---|
+| `+0x180` | mix input-sum meter, **left** |
+| `+0x184` | mix input-sum meter, **right** |
+| `+0x188`–`+0x18F` | always zero |
+| `+0x190` | mix **output** meter, left |
+| `+0x194` | mix **output** meter, right |
+| `+0x198`–`+0x1A7` | always zero |
+
+The identification is from correlation, not from the binary. With only the
+Andromeda feeding the card (channels 34/35), `+0x180`/`+0x184` tracked those two
+channel levels to within a couple of counts on every read — the small difference
+is consistent with being sampled at a slightly different instant, not with being
+a different quantity:
+
+```
+t=13s   ch34 12090  ch35 11589   |  +180 12090   +184 11588
+t=22s   ch34 12532  ch35 12394   |  +190 12532   +184 12394
+t=37s   ch34 11114  ch35 11605   |  +180 11113   +184 11607
+```
+
+`+0x190`/`+0x194` is a different signal. It was **already live while every input
+channel read zero**, decaying from 23560, during host playback to outputs 1–2;
+once the synth came in it sat consistently *above* the input sum (23643 against
+11113). So it is the bus after everything summed into it, host playback
+included, whereas `+0x180` is the input contribution alone.
+
+**Caution on scale.** Across two runs the input pair never set bit 14 (OR =
+`0x3FFF`) while the output pair reached `0x7FFF`. That is suggestive of a
+half-scale input meter, but it is a bitwise OR over observed values, not a
+measured ceiling, and the loudest input seen was only ~12900. **Do not encode a
+16383 cap** until something drives an input past half scale and the value is
+watched. Until then treat both as the usual 0..32768.
+
+### Consequence for our console
+
+Two things follow for `src/cuemix-fx`:
+
+- there is a **real bus meter available for the MIX section**, free with the same
+  read, rather than something we would have to sum ourselves;
+- **the whole call returns zeros unless the card's audio engine is running.**
+  See below — this is the single easiest way to misread the meter path as broken.
+
+## Meters need a running audio engine
+
+`ReadLevelMeters` succeeds, raises nothing, and returns an all-zero struct —
+levels, clip and tail alike — whenever the card's engine is idle:
+
+```
+IOAudioEngineState                = 0
+IOAudioEngineNumActiveUserClients = 0
+```
+
+Confirmed 2026-09-19 by accident: a capture taken while synths were playing into
+the inputs read zero throughout, because nothing held the CoreAudio device open.
+Starting playback and repeating the run, with the same signal, produced levels
+immediately. Feeding the inputs is not enough; a client has to be streaming.
+
+To check before blaming the decode:
+
+```sh
+ioreg -c com_motu_driver_PCIAudio_Engine -r -w0 | grep -E "IOAudioEngineState|NumActiveUserClients"
+```
+
+`MOTU PCI Audio Setup` does not stream, so opening our own console alone will not
+light the meters either. Any DAW or system playback routed to the card will.
 
 ## What does not transfer from a FireWire/USB interface
 
