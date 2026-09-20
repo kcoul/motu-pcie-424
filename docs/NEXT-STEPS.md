@@ -142,14 +142,40 @@ no hardened runtime, so validation never engages and the 2017 plugin loads. This
 is the same warning as "do not add hardened runtime", now demonstrated from the
 other side by a real casualty.
 
-**So there is no live oracle, and none is coming.** MotuSpy on Mojave stays the
-only way to watch MOTU's own console drive this card. Weigh that when deciding
-whether a write needs confirming against MOTU's behaviour.
+### …and then it was made to work
 
-*Possible workaround, untested:* re-sign `/Applications/CueMix FX.app` with
-`com.apple.security.cs.disable-library-validation`. The blocker is validation
-policy, not the plugin, so it ought to load. Reversible — re-extract from the
-`.pkg` (below).
+**Later the same session: the workaround holds.** A copy of CueMix FX, re-signed
+with `com.apple.security.cs.disable-library-validation`, **drives the PCIe-424 on
+Sequoia**. Hardened runtime was kept; only library validation had to go.
+
+```sh
+ditto "/Applications/CueMix FX.app" "/Applications/CueMix FX (patched).app"
+codesign --force --sign "<identity>" --options runtime \
+  --entitlements cuemix-ents.plist --timestamp=none \
+  "/Applications/CueMix FX (patched).app"
+```
+
+Proof is MOTU's own prefs gaining a PCI engine key —
+`com_motu_driver_PCIAudio_Engine:PCI-424.bus19.slot0` — where the stock app never
+survived long enough to write one. Full recipe and caveats in `ORIGINAL-UI.md`.
+
+**So there is a live oracle after all**, and three things that were written off
+earlier today are back:
+
+- **trim's per-channel min/max can be read off MOTU's own UI** instead of probed
+  by walking bounds until something segfaults;
+- **meter decay and the clip LED can be compared side by side** with MOTU's
+  console, which was the original plan for step 2;
+- **OSC against the PCI engine works** (`…_OSCClients` in the prefs), so
+  `osc-log.py` can confirm the 40·log10 law from MOTU's own formatter. The note
+  under step 4 saying this was impossible is superseded — it was written while
+  CueMix FX could only serve the UltraLite.
+
+MotuSpy on Mojave drops back to a cross-check rather than the only witness.
+
+> The entitlement is a real weakening — it lets that app load libraries signed by
+> anyone. Scope it to the one copy. The original stays unmodified, as does the
+> kext.
 
 ### Facts captured from the card
 
@@ -268,10 +294,9 @@ prints cardType, maxLevelMeters, per-channel level and clip, flags anything
 outside 0..32768, and reports whether the 40 unidentified tail bytes ever come
 back set.
 
-Then CueMix FX itself, which now *draws* meters from that same data. There is no
-side-by-side comparison available — MOTU's console cannot open this card at all
-(see 2026-09-19 above) — so both of these have to be judged on their own, or
-against MotuSpy on Mojave. Two things to watch:
+Then CueMix FX itself, which now *draws* meters from that same data. Compare it
+side by side with MOTU's console — the re-signed copy makes that possible again.
+Two things to watch:
 
 - **the decay speed.** MOTU's 0.015-per-update is per *update*, and its update
   rate is not in the binary, so ours may drift fast or slow. `kPeakDecayPerTick`
@@ -306,11 +331,12 @@ stream. The cheapest confirmation of the value laws is reading a `/cdf` and its
 `/cdf/str` sibling together: if 16384 prints as `-12.0 dB`, the 40·log10 law is
 confirmed by MOTU's own formatter.
 
-**Reassess this step before spending time on it.** CueMix FX is the OSC server,
-and it cannot open the PCI card, so it can only serve the UltraLite — whose
-faders use `ValueFaderFX` (`sqrt`/square), *not* the PCI `ValueLegacyFader`
-(linear, 256-quantized). It therefore cannot confirm the 40·log10 law for this
-card. Mojave, or our own readback, is the only route left.
+**This step is live again.** It was briefly written off on the grounds that
+CueMix FX could only ever serve the UltraLite — whose faders use `ValueFaderFX`
+(`sqrt`/square) rather than the PCI `ValueLegacyFader` (linear, 256-quantized),
+making it useless for confirming this card's law. The re-signed build serves the
+**PCI** engine, and its prefs carry a `…_OSCClients` key for it, so MOTU's own
+formatter is reachable for the card we care about.
 
 ### Not worth a trip
 

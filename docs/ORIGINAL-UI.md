@@ -124,17 +124,59 @@ is also the reason that warning must never be ignored: adding `--options
 runtime` without `com.apple.security.cs.disable-library-validation` would put
 our apps in exactly MOTU's position.
 
-### Could it be made to work?
+### It can be made to work — and it does
 
-Untested as of 2026-09-19. Re-signing `/Applications/CueMix FX.app` locally with
-`com.apple.security.cs.disable-library-validation` should let it load the 2017
-plugin, since the blocker is validation policy rather than the plugin itself.
-That would give a live oracle beside our app. It breaks notarization, which does
-not matter for a locally installed app, and it is fully reversible — the app can
-be re-extracted from MOTU's `.pkg` (see `NEXT-STEPS.md`).
+**Confirmed 2026-09-19, same session.** Re-signing the app with
+`com.apple.security.cs.disable-library-validation` is sufficient. MOTU's own
+CueMix FX now drives the PCIe-424 on Sequoia.
+
+The proof is MOTU's own preferences, which gain a **PCI** engine key where the
+stock app never got far enough to write one:
+
+```
+com_motu_driver_PCIAudio_Engine:PCI-424.bus19.slot0
+com_motu_driver_PCIAudio_Engine:PCI-424.bus19.slot0_BusNames
+com_motu_driver_PCIAudio_Engine:PCI-424.bus19.slot0_CueMix Control Surfaces
+com_motu_driver_PCIAudio_Engine:PCI-424.bus19.slot0_OSCClients
+```
+
+Compare the Big Sur volume's `com_motu_driver_FWA_Engine:00000d2f76`, which is
+an UltraLite. This is the card, down to bus and slot.
+
+The recipe, on a **copy**, leaving the original and the kext untouched:
+
+```sh
+ditto "/Applications/CueMix FX.app" "/Applications/CueMix FX (patched).app"
+codesign --force --sign "<your Developer ID or Apple Development identity>" \
+  --options runtime --entitlements cuemix-ents.plist --timestamp=none \
+  "/Applications/CueMix FX (patched).app"
+```
+
+`cuemix-ents.plist` keeps MOTU's own `com.apple.security.device.audio-input` and
+adds `com.apple.security.cs.disable-library-validation`. Hardened runtime is
+*retained* — it is library validation specifically, not hardening as a whole,
+that rejects the 2017 plugin. That is a useful distinction: the entitlement was
+enough, so dyld's "has to be at least ad-hoc signed" is a symptom of validation
+policy, not an independent requirement.
+
+Notarization is broken by this, which does not matter for a locally installed
+app, and nothing is lost if it goes wrong — re-extract from MOTU's `.pkg`.
+
+**What this buys:**
+
+- a live oracle beside our own console, for trim ranges, meter ballistics, the
+  clip LED, and write semantics;
+- a working control surface for a PCI rig on a modern OS, today;
+- an OSC server for the **PCI** engine (`_OSCClients` above), so `osc-log.py`
+  can confirm the PCI value laws — which is *not* possible against an UltraLite,
+  whose faders use a different law entirely.
 
 MOTU fixing this upstream would mean re-signing a 2017 binary with a modern code
-directory, which is not something to wait for.
+directory. Nothing here waits on that.
+
+> The entitlement genuinely weakens the process: it lets this app load libraries
+> signed by anyone. It is applied to one copy, on one machine, to load a plugin
+> that *is* MOTU-signed and merely signed too long ago. Do not generalise it.
 
 ### Architecture constraint
 

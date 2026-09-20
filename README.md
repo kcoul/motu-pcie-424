@@ -28,6 +28,11 @@ library validation never engages and the 2017 plugin loads normally. That is a
 constraint to preserve deliberately, not an accident — see "The key trick" and
 the signing notes in `docs/NEXT-STEPS.md`.
 
+MOTU's console can also be *made* to work, which is worth knowing because it
+gives a live reference to develop against: a copy re-signed with
+`com.apple.security.cs.disable-library-validation` drives the PCIe-424 on
+Sequoia. Recipe and caveats in `docs/ORIGINAL-UI.md`.
+
 The driver's CoreAudio HAL plugin still exposes MOTU's complete C++ control API.
 This project talks to it directly.
 
