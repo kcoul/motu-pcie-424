@@ -87,7 +87,7 @@ apps that refused to start: `open` reported
 `NSPOSIXErrorDomain Code=162 "Launchd job spawn failed"`. The cause was
 `security find-identity -v -p codesigning | head -1` — this keychain holds
 several Apple Development certs from different teams, and the one that sorted
-first was the **personal** team's (`O=Kieran Coulter`, `OU=<personal-team-id>`, CN
+first was the **personal** team's (`O=<personal name>`, `OU=<personal-team-id>`, CN
 `<personal-apple-id>`). That one does not launch. `-v` also still lists
 *revoked* certs, tagged `CSSMERR_TP_CERT_REVOKED`, and the previous Third Eye
 cert is revoked.

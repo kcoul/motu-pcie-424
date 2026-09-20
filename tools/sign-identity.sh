@@ -6,8 +6,8 @@
 #
 #  1. `security find-identity -v -p codesigning | head -1` is unsafe. This
 #     keychain holds Apple Development certs from several teams, and the one
-#     that sorts first is the *personal* team's (O=Kieran Coulter,
-#     OU=<personal-team-id>, CN "Apple Development: <personal-apple-id>"). Apps signed
+#     that sorts first is the *personal* team's (O=<personal team>,
+#     OU=<personal-team>, CN "Apple Development: <personal-apple-id>"). Apps signed
 #     with it refuse to launch:
 #
 #       open: ... NSPOSIXErrorDomain Code=162 "Launchd job spawn failed"
