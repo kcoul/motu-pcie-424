@@ -2,5 +2,5 @@ build/
 *.dylib
 *.o
 .DS_Store
-build/cmake/
 __pycache__/
+build/

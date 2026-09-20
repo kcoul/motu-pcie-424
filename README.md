@@ -116,6 +116,8 @@ tools/   build.sh, coreaudio-trace.c, vtdump.py, entitlements.plist
          dis-cuemix.sh     disassemble MOTU's CueMix FX (unstripped, has the PCI back end)
          osc-log.py        log/probe CueMix FX's OSC interface
          rsrc.py           read a classic resource fork (MOTU PCI Audio Setup.rsrc)
+         notarize.sh       build, sign, notarize and staple a release
+         mkicon.m          draw the app icons
 ```
 
 ## Building

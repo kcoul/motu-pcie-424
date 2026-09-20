@@ -66,12 +66,40 @@ else()
     message(STATUS "Code signing identity: ${MOTU_SIGN_ID}")
 endif()
 
+# Release builds are signed for distribution: a Developer ID identity, hardened
+# runtime and a secure timestamp, all three of which notarization requires.
+#
+# Hardened runtime is the dangerous one. It turns on library validation, which
+# is precisely what stops MOTU's own CueMix FX from loading the 2017 PCI
+# HALPlugin (docs/ORIGINAL-UI.md). tools/entitlements.plist carries
+# com.apple.security.cs.disable-library-validation to compensate, and that pair
+# was verified against the card on 2026-09-19.
+#
+#   cmake -B build/release -DCMAKE_BUILD_TYPE=Release -DMOTU_RELEASE_SIGN=ON \
+#         -DMOTU_SIGN_IDENTITY="Developer ID Application: ... (TEAMID)"
+#
+# Default OFF, so ordinary development builds keep signing exactly as before --
+# no hardened runtime, so no library validation to work around.
+option(MOTU_RELEASE_SIGN "Sign for distribution: hardened runtime + timestamp" OFF)
+
+if(MOTU_RELEASE_SIGN)
+    set(MOTU_SIGN_EXTRA --options runtime --timestamp)
+    if(NOT MOTU_SIGN_ID MATCHES "Developer ID")
+        message(WARNING
+            "MOTU_RELEASE_SIGN is ON but the identity is '${MOTU_SIGN_ID}'. "
+            "Notarization needs a 'Developer ID Application' certificate; an "
+            "Apple Development one will not launch on other machines.")
+    endif()
+else()
+    set(MOTU_SIGN_EXTRA "")
+endif()
+
 function(motu_sign target)
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND codesign -f -s "${MOTU_SIGN_ID}" --entitlements
+        COMMAND codesign -f -s "${MOTU_SIGN_ID}" ${MOTU_SIGN_EXTRA} --entitlements
                 "${CMAKE_SOURCE_DIR}/tools/entitlements.plist"
                 "$<TARGET_BUNDLE_DIR:${target}>"
-        COMMENT "Signing ${target} with audio-input entitlement"
+        COMMENT "Signing ${target}"
         VERBATIM)
 endfunction()
 

@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+  <!-- Without this the HAL never hands out the card pointer. -->
   <key>com.apple.security.device.audio-input</key><true/>
+
+  <!-- Required the moment hardened runtime is on, which notarization demands.
+       Hardening enables library validation, and MOTU's PCI HALPlugin.bundle was
+       signed in 2017 with a SHA-1 only code directory that dyld refuses to load
+       into a validated process, reporting it as "no cdhash, completely
+       unsigned". That is exactly what stops MOTU's own CueMix FX from opening a
+       PCI-424. See docs/ORIGINAL-UI.md.
+
+       Verified 2026-09-19: hardened runtime plus this entitlement loads the
+       plugin fine, hardened runtime without it does not. Apple accepts this
+       entitlement for notarization.
+
+       Inert on non-hardened builds, so it is safe to carry unconditionally, and
+       carrying it unconditionally means a release build cannot accidentally
+       ship without it. -->
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
 </dict></plist>
