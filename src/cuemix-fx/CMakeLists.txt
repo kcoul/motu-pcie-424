@@ -28,4 +28,32 @@ target_link_libraries(CueMixFX PRIVATE
     ${MOTU_JUCE_MODULES}
     ${MOTU_JUCE_FLAGS})
 
+# Bundle the Classic sprites so a shipped .app is self-contained.
+#
+# ClassicSkin::findResources looks inside our own bundle first
+# (Contents/Resources/classic), before falling back to whatever CueMix FX the
+# user has installed. Without this step that first path never exists, so a
+# release build silently drops to the Modern skin on any machine without MOTU's
+# app -- which is most machines we would be shipping to.
+#
+# Copied only if the artwork is present, so a checkout without it still builds;
+# the runtime fallback then covers it. See assets/classic/README.md.
+set(MOTU_CLASSIC_DIR "${CMAKE_SOURCE_DIR}/assets/classic")
+file(GLOB MOTU_CLASSIC_SPRITES "${MOTU_CLASSIC_DIR}/*.png")
+if(MOTU_CLASSIC_SPRITES)
+    list(LENGTH MOTU_CLASSIC_SPRITES MOTU_CLASSIC_COUNT)
+    message(STATUS "CueMix FX: bundling ${MOTU_CLASSIC_COUNT} Classic sprites")
+    add_custom_command(TARGET CueMixFX POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_BUNDLE_CONTENT_DIR:CueMixFX>/Resources/classic"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MOTU_CLASSIC_SPRITES}
+                "$<TARGET_BUNDLE_CONTENT_DIR:CueMixFX>/Resources/classic"
+        COMMENT "Bundling Classic skin sprites")
+else()
+    message(STATUS "CueMix FX: no Classic sprites in assets/classic -- the app "
+                   "will read them from an installed CueMix FX, or use Modern")
+endif()
+
+# Signing must come after anything that modifies the bundle, or the signature
+# covers a tree that no longer matches.
 motu_sign(CueMixFX)
