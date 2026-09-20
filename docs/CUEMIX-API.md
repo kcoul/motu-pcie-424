@@ -370,11 +370,53 @@ int n = (int)floorf(hw);
 out = (n > 0 ? "+" : "") + NumToUString(n);
 ```
 
-So `CUEMIX-PLAN.md`'s `trim (v−64)` placeholder is the wrong shape entirely, and
-the trim knob cannot be drawn correctly until we know where the min/max come
-from for an AudioWire channel. That is an open item: the observed default of 64
-from `GetInputTrim` does not obviously fit a dB trim, and the scaling between
-the card's value and the `Value`'s hardware value has not been traced.
+So `CUEMIX-PLAN.md`'s `trim (v−64)` placeholder is the wrong shape entirely.
+
+### Solved 2026-09-19: on a PCI-424 the range is 64…255, shown as 0…+12 dB
+
+`Device424::CreateTrimValue(unsigned int)` (`0x100032c30`) builds the trim Value
+and seeds it with a **single 16-byte constant, identical for every channel** —
+so despite `ValueLegacyTrim` supporting a per-channel range, Device424 never
+varies it:
+
+```
+100032c94  adrp x9, 0x10021d000
+100032c98  ldr  q0, [x9, #0x330]      ; 00 00 00 00  00 00 00 00  00 00 80 42  00 00 7f 43
+100032c9c  stur q0, [x19, #0x1c]      ; -> +0x24 = 64.0 (min), +0x28 = 255.0 (max)
+```
+
+The display is not `GetUIStringWithHardwareValue`; a `StringDisplayScalerPrintf`
+is transferred onto the Value instead, constructed with `(64.0, 255.0, 0.0,
+12.0)` and the format `"%0.0f dB"`. `StringDisplayScalerPrintf::ConvertToString`
+(`0x100179168`) computes, with `a,b,c,d` the four floats:
+
+```c
+display = c + (hw - a) * (d - c) / (b - a);
+```
+
+so for this card:
+
+```c
+dB = (hw - 64) * 12.0f / 191.0f;     // hw 64 -> 0 dB, hw 255 -> +12 dB
+hw = 64 + dB * 191.0f / 12.0f;
+```
+
+| | value |
+|---|---|
+| hardware range | **64 … 255** (191 steps) |
+| displayed range | **0 … +12 dB**, integer dB |
+| default | **64**, i.e. 0 dB |
+| resolution | ~0.063 dB per step |
+
+`Device424::CreateTrimValue` also calls vtable `+0x78` with `64.0`, which matches
+what the card returns: **`GetInputTrim` reads a uniform 64 on all 96 channels**
+of the studio rig (HD192, 2×24I/O, 2408mk3, active and inactive alike),
+confirmed with `MotuTrim`. So 64 is the shipped default everywhere, not a
+per-channel calibration, and a rig that has never touched trim reads 0 dB
+across the board.
+
+Note this is a **gain-only** trim: there is no attenuation below 0 dB, so trim
+cannot fix a source that is too hot, only lift one that is too quiet.
 
 ### Bus assign
 
@@ -578,8 +620,10 @@ Per polled frame MOTU then writes two parameters per channel: the clip float
   so `maxLevelMeters = 48`.** Read off the studio card (HD192 + 2×24I/O +
   2408mk3). Note 48 is *fewer than the rig's 68 active inputs*, so a full PCI
   system cannot meter every input at once and the console must choose which 48.
-- **Trim's min/max for an AudioWire channel**, and how the card's `GetInputTrim`
-  value relates to the `Value`'s hardware value.
+- ~~**Trim's min/max for an AudioWire channel**~~ — **answered 2026-09-19:
+  64…255 hardware, 0…+12 dB displayed, default 64.** From
+  `Device424::CreateTrimValue` plus `StringDisplayScalerPrintf::ConvertToString`,
+  and confirmed against the card. See "Solved 2026-09-19" above.
 - **Which clip state is 1 and which is 2** — now answered by inference (see
   "Which clip value means what"): 1 is clipped, 2 is signal present. Worth one
   confirmation with real signal, since the frame order comes from the artwork.
