@@ -21,8 +21,12 @@ public:
         if (current) version_ = juce::String(current.versionString(e));
 
         auto has = [&](Option o) { int v; return current && current.getOption(e, o, v); };
-        if (has(Option::AESInputSteal)) buildHD192();
-        else                            buildReferencePane(has(Option::AnalogMirror));
+        const bool mirror = has(Option::AnalogMirror);
+        if (has(Option::AESInputSteal))            buildHD192();
+        else if (mirror || has(Option::InputLevels)) buildReferencePane(mirror);
+        // An interface the driver reports no options for at all. MOTU says so
+        // rather than showing an empty pane, and so do we.
+        else                                       buildEmptyPane();
 
         footer_ = label(version_, 16, height_ - 12);
         setSize(kWidth, height_);
@@ -58,7 +62,7 @@ private:
         if (!e.raised()) card_.commitChanges(e, true);
         if (e.raised())
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, title(),
-                "The driver has reported an error.\n" + juce::String(e.str()));
+                                                   juce::String(e.message()));
         refresh();
     }
 
@@ -116,20 +120,20 @@ private:
     void buildHD192() {
         label("AES/EBU Input Options:", 16, 23);
         label("Steal Inputs", 32, 46);
-        popup(Option::AESInputSteal,
-              { "None", "In 1-2", "In 3-4", "In 5-6", "In 7-8", "In 9-10", "In 11-12" }, 232, 46, 184);
-        checkbox("Rate Convert", 234, 70,
+        aesControls_.push_back(popup(Option::AESInputSteal,
+              { "None", "In 1-2", "In 3-4", "In 5-6", "In 7-8", "In 9-10", "In 11-12" }, 232, 46, 184));
+        aesControls_.push_back(checkbox("Rate Convert", 234, 70,
                  [this] { return read(Option::AESInputSRC) != 0; },
-                 [this](bool on) { write(Option::AESInputSRC, on ? 1 : 0); });
+                 [this](bool on) { write(Option::AESInputSRC, on ? 1 : 0); }));
         rules_.push_back(93);
 
         label("AES/EBU Output Options:", 16, 114);
         // Despite its key name, AESOutputSRCMode is what AES/EBU out carries.
         label("Mirror Analog", 32, 138);
-        popup(Option::AESOutputSRCMode,
+        aesControls_.push_back(popup(Option::AESOutputSRCMode,
               { "Out 1-2", "Out 3-4", "Out 5-6", "Out 7-8", "Out 9-10", "Out 11-12",
                 "In 1-2", "In 3-4", "In 5-6", "In 7-8", "In 9-10", "In 11-12" }, 232, 138, 184,
-              { 0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13 });
+              { 0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13 }));
 
         // Output Clock folds a "Fixed Frequency" checkbox into the same value:
         // 0 System, 1 AES Input, 2 AES Word In; a rate is 3-6 fixed, 7-10 not.
@@ -139,6 +143,7 @@ private:
         clock->addItemList({ "System", "AES Input", "AES Word In", "44.1 kHz", "48 kHz", "88.2 kHz", "96 kHz" }, 1);
         clock->setBounds(232, 162 - kCtlH / 2, 184, kCtlH);
         addAndMakeVisible(*clock);
+        aesControls_.push_back(clock);
         auto* fixed = checkbox("Fixed Frequency", 234, 186,
                                [this] { const int v = read(Option::AESOutputClock); return v >= 3 && v <= 6; },
                                [this](bool on) {
@@ -150,6 +155,7 @@ private:
             if (i < 0) return;
             write(Option::AESOutputClock, i < 3 ? i : i + (fixed->getToggleState() ? 0 : 4));
         };
+        aesControls_.push_back(fixed);
         refreshers_.push_back([this, clock, fixed] {
             const int v = read(Option::AESOutputClock);
             clock->setSelectedItemIndex(v < 3 ? v : 3 + (v - 3) % 4, juce::dontSendNotification);
@@ -168,8 +174,36 @@ private:
         label("Peak/Hold Time-out", 32, 282);
         popup(Option::ClipHoldTime, timeouts, 232, 282, 184);
 
+        // AES/EBU cannot carry audio above 96 kHz, and MOTU greys the three AES
+        // panes when the card is running faster:
+        //
+        //   AWGetNominalSampleRate();  cmpl $0x17700, %eax;  setbe %al
+        //   EnablePane(0x4e24, al);  EnablePane(0x4e23, al);  EnablePane(0x4e21, al)
+        //
+        // 96000 is the only sample-rate constant in MOTU's whole binary. The
+        // wording is theirs too, STR# 27545 item 15.
+        aesWarning_ = label("", 186, 23, 240);
+        aesWarning_->setJustificationType(juce::Justification::centredLeft);
+        refreshers_.push_back([this] {
+            const double rate = motu::device::sampleRate(motu::Card::findDevice());
+            const bool available = rate > 0.0 && rate <= 96000.0;
+            for (auto* c : aesControls_) c->setEnabled(available);
+            aesWarning_->setVisible(!available);
+            if (!available)
+                aesWarning_->setText("(AES/EBU not available at " + juce::String((int)rate) + " Hz)",
+                                     juce::dontSendNotification);
+        });
+
         height_ = 326;
         refresh();
+    }
+
+    // Some interfaces have nothing to configure. MOTU shows a sentence instead
+    // of an empty window; the string is its own, from the binary.
+    void buildEmptyPane() {
+        auto* text = label("No options available for this interface.", 16, 40, kWidth - 32);
+        text->setJustificationType(juce::Justification::centred);
+        height_ = 96;
     }
 
     // 24I/O and 2408mk3: Input Reference Level radios and Word Out Rate, plus
@@ -264,6 +298,11 @@ private:
     std::vector<std::unique_ptr<juce::Component>> owned_;
     std::vector<std::function<void()>> refreshers_;
     juce::Label* footer_ = nullptr;
+
+    // AES/EBU is unavailable above 96 kHz; these are greyed and the warning
+    // shown when that happens. See buildHD192.
+    std::vector<juce::Component*> aesControls_;
+    juce::Label* aesWarning_ = nullptr;
 };
 
 class Window : public juce::DocumentWindow {
