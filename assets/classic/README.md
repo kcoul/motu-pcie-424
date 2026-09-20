@@ -1,30 +1,28 @@
 # Classic skin sprites
 
-**No artwork ships here.** The Classic skin draws MOTU's own sprites, which are
-MOTU's copyright and are not redistributed by this project. The 24 PNGs that
-used to sit in this directory were removed on 2026-09-19, before the repository
-was made public, and `.gitignore` keeps them out.
+MOTU's own CueMix FX artwork: the Legacy/PCI subset of the 145 PNGs in
+`CueMix FX.app/Contents/Resources` (1.6 73220), copied unmodified. These are
+only the sprites `src/cuemix-fx/ClassicConsole.cpp` draws.
 
-**Nothing needs doing to make Classic work.** The app already looks for the
-artwork in your own installed copy, in this order:
+These remain MOTU's copyright; see the notices in `LICENSE`.
+
+**These are bundled into the built app.** `src/cuemix-fx/CMakeLists.txt` copies
+them to `CueMix FX.app/Contents/Resources/classic` after linking, so a release
+is self-contained and does not need MOTU's own app installed. The copy is
+conditional, so a checkout without the artwork still builds and falls back to
+the runtime search below; CMake prints which of the two it did.
+
+`ClassicSkin::findResources` then looks, in order, at:
 
 1. whatever *View > Locate MOTU CueMix FX.app…* was last pointed at;
-2. `Contents/Resources/classic` inside our own bundle;
-3. `assets/classic` here, if you have put the PNGs back yourself;
+2. `Contents/Resources/classic` inside our own bundle (the copy above);
+3. `assets/classic` here, found by walking up from the build tree;
 4. `/Applications/CueMix FX.app/Contents/Resources`, and the same under
    `~/Applications`;
 5. any mounted volume with a `CueMix FX.app` in its `Applications`.
 
-So installing MOTU's CueMix FX — which is worth doing anyway, since it runs
-again after a one-line re-sign (`docs/ORIGINAL-UI.md`) — is all that is needed.
-`ClassicSkin::isUsable` probes for `BackgroundRightPCI.png`. Without it the
-Classic menu item is simply disabled and the Modern skin, which is our own
-artwork, is used instead.
-
-The sprites the console actually draws are the Legacy/PCI subset of the 145 PNGs
-in `CueMix FX.app/Contents/Resources` (verified against 1.6 b5003c51d; all 24
-are present there). The geometry below is this project's own reverse
-engineering and is what the drawing code relies on.
+`isUsable` probes for `BackgroundRightPCI.png`. If nothing matches, the Classic
+menu item disables itself and the Modern skin — our own artwork — is used.
 
 Sheets are equal frames laid out row by row:
 
