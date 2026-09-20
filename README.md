@@ -13,10 +13,20 @@ in-house `AwesomeLib` toolkit) and cannot launch on modern macOS at all.
 `CueMix FX` is a different story than earlier revisions of this file claimed.
 MOTU kept building it: the 2025 universal build is Cocoa-rendered, notarized,
 hardened, binds no Carbon symbols, and **runs fine on Sequoia** — it is driving
-an UltraLite mk3 Hybrid on the development machine. Signing, notarization,
-library validation, kext loading and the Carbon theory are all ruled out, with
-evidence, in `docs/ORIGINAL-UI.md`. What it does on a PCI-424 under Sequoia is
-an open question that needs the card to answer.
+an UltraLite mk3 Hybrid on the development machine.
+
+Against a **PCI-424**, though, it cannot run at all, and as of 2026-09-19 we
+know exactly why. MOTU's PCI `HALPlugin.bundle` was signed in **2017** with a
+SHA-1-only code directory. CueMix FX 1.6 runs under hardened runtime, which
+enforces library validation, and dyld refuses a SHA-1-only signature outright —
+reporting it as *"no cdhash, completely unsigned"*. CoreAudio then cannot open
+the plugin and the app exits within 40 ms, leaving no crash report. Full
+evidence in `docs/ORIGINAL-UI.md`.
+
+**This project is unaffected because it does not use hardened runtime**, so
+library validation never engages and the 2017 plugin loads normally. That is a
+constraint to preserve deliberately, not an accident — see "The key trick" and
+the signing notes in `docs/NEXT-STEPS.md`.
 
 The driver's CoreAudio HAL plugin still exposes MOTU's complete C++ control API.
 This project talks to it directly.
@@ -28,7 +38,8 @@ enabled**. `src/common/motu_card.*` wraps the whole API; `motu-dump` exercises i
 
 ```
 GetNumWires = 4    HD192 / 24I/O-2 / 24I/O-3 / 2408mk3
-96 inputs (36 active), 96 outputs (36 active)
+96 inputs (68 active), 96 outputs (68 active)
+cardType = 2  ->  48 level meters
 GetCueMixAPI / GetSMPTEAPI / GetTalkbackAPI   all non-NULL
 14 clock sources enumerated, 6 sample rates (44.1k–192k)
 ```

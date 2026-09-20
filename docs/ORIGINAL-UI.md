@@ -48,7 +48,7 @@ Every explanation that has been offered for it so far is now eliminated:
 |---|---|---|
 | Draws through Carbon, so it cannot survive modern macOS | **wrong for this build** | no `AwesomeLib/…MacCarbon.cpp` paths, a `ViewMacCocoa` renderer instead, and **zero Carbon symbols bound** (Carbon.framework is a vestigial load command) |
 | The app is not notarized / not signed | **wrong** | `spctl`: *accepted, source=Notarized Developer ID*; hardened runtime (`flags=0x10000(runtime)`), `Developer ID Application: MOTU (KRCLLMGZ2D)` |
-| Library validation blocks the HAL plugin from loading into a hardened app | **wrong** | the PCI `HALPlugin.bundle` is signed by the **same** Team ID `KRCLLMGZ2D`, `codesign -v` reports *valid on disk* and *satisfies its Designated Requirement* |
+| Library validation blocks the HAL plugin from loading into a hardened app | **CORRECT — this is the cause.** See "Settled: 2026-09-19" below | the evidence in this row is all true and all beside the point: same Team ID `KRCLLMGZ2D`, `codesign -v` passes. But `codesign` accepts a legacy signature that **dyld will not load**. Measured against the *FireWire* plugin, never the PCI one |
 | The in-process HAL plugin model is dead on modern macOS | **wrong** | `lsof` on the live process shows `MOTUFireWireAudio.kext/…/FWHALPlugin` loaded **into CueMix FX itself**, alongside Apple's own `AppleHDAHALPlugIn`. No MOTU plugin is in `coreaudiod` — these are old-style in-process `AudioHardwarePlugIn`s, and they still work |
 | MOTU kexts will not load on Sequoia | **wrong** | `kextstat`: `com.motu.driver.FireWireAudio (1.6 b5003c51d)` is loaded |
 | The PCI kext is unsigned or unnotarized | **wrong** | kext and plugin both carry `Developer ID Application: MOTU (KRCLLMGZ2D)` |
@@ -69,6 +69,73 @@ So the ten-minute test at the studio is precise: launch MOTU's CueMix FX with th
 card present and find out whether `GetAvailableDevices` returns the PCI device at
 all. If it does and the app still exits, the cause is downstream of discovery.
 
+## Settled: 2026-09-19, at the studio, with the card
+
+The test was run. **MOTU's CueMix FX cannot drive a PCI-424 on Sequoia, and the
+reason is library validation after all** — the row above is corrected.
+
+It never reaches discovery. The app launches, checks in with LaunchServices,
+gets its TCC grants, starts CoreAudio, and dies 40 ms later:
+
+```
+Error loading /Library/Extensions/MOTUPCIAudio.kext/Contents/PlugIns/
+  HALPlugin.bundle/Contents/MacOS/HALPlugin (96):
+  dlopen(...): code signature ... not valid for use in process:
+  mapped file has no cdhash, completely unsigned?
+  Code has to be at least ad-hoc signed.
+(CoreAudio) HALC_ShellDriverPlugIn.cpp:83
+  HALC_ShellDriverPlugIn::Open: Can't get a pointer to the Open routine
+```
+
+No crash report is produced — it exits cleanly, which is why this reads as
+"opens and instantly closes" rather than as a crash.
+
+### Why the earlier row got it wrong
+
+The plugin is *not* unsigned, despite what dyld's message guesses. It is signed
+by MOTU, Team `KRCLLMGZ2D`, and `codesign -v --strict` passes. The difference is
+the **age of the code directory**:
+
+| | CodeDirectory | Hash type | Signed |
+|---|---|---|---|
+| PCI `HALPlugin.bundle` | `v=20200` | **`sha1` only** | Jul 21, 2017 |
+| FireWire `FWHALPlugin` | modern rebuild | `sha256` | 2025 |
+| `CueMix FX` 1.6 b5003c51d | `v=20500`, `flags=0x10000(runtime)` | `sha256` (+sha1) | 2025 |
+
+Since Catalina, dyld will not accept a SHA-1-only code directory in a
+library-validated process, and reports it as having "no cdhash". `codesign`
+still validates it, because `codesign` tolerates legacy signatures that the
+loader does not. **Both tools are right; they answer different questions.**
+
+The 2026-09-18 measurements were all taken against the **FireWire** plugin — a
+2025 rebuild carrying a SHA-256 directory — which loads into a hardened app
+without complaint. That is precisely the caveat the previous section ends on,
+and it turned out to be the whole story.
+
+### Why our own apps are unaffected
+
+`tools/build.sh` and `CMakeLists.txt` sign **without** hardened runtime
+(`flags=0x0`), so library validation never engages and the 2017 plugin loads
+normally. Verified the same day: `MotuDump` reads all four interfaces while
+MOTU's own console cannot open the plugin at all.
+
+This is the README's existing warning, now demonstrated from the other side. It
+is also the reason that warning must never be ignored: adding `--options
+runtime` without `com.apple.security.cs.disable-library-validation` would put
+our apps in exactly MOTU's position.
+
+### Could it be made to work?
+
+Untested as of 2026-09-19. Re-signing `/Applications/CueMix FX.app` locally with
+`com.apple.security.cs.disable-library-validation` should let it load the 2017
+plugin, since the blocker is validation policy rather than the plugin itself.
+That would give a live oracle beside our app. It breaks notarization, which does
+not matter for a locally installed app, and it is fully reversible — the app can
+be re-extracted from MOTU's `.pkg` (see `NEXT-STEPS.md`).
+
+MOTU fixing this upstream would mean re-signing a 2017 binary with a modern code
+directory, which is not something to wait for.
+
 ### Architecture constraint
 
 `HALPlugin` is **i386 + x86_64, with no arm64 slice**, and it loads into the
@@ -79,8 +146,27 @@ Intel.
 
 ### The Big Sur volume
 
-Checked read-only, because it was mounted: **the Big Sur volume never had the PCI
-driver at all.**
+> **Corrected 2026-09-19.** The conclusion below — "never had the PCI driver at
+> all" — is **wrong**, and it was an over-read of a snapshot. Kieran's account:
+> the PCI kext *was* installed on Big Sur, audio worked, and **CueMix FX drove
+> the PCI-424 there for years**. It stopped only after troubleshooting began.
+>
+> The filesystem state recorded below was captured in 2026, long *after* that
+> tinkering, so it shows the end state and not the original one. A volume with no
+> `MOTUPCIAudio.kext` today is entirely consistent with a kext that was removed
+> or replaced during troubleshooting.
+>
+> This also fits the mechanism established above. A SHA-1 signature does not
+> rot; what changes is whether the **host process** enforces library validation.
+> CueMix FX driving a PCI-424 on Big Sur is exactly "working through a hole that
+> later closed" — a build without hardened runtime, or an OS not yet enforcing
+> it. Treat the 2025 hardened build as the thing that broke it, not the plugin.
+>
+> Read the rest of this section as *the current state of that volume*, which is
+> all it ever established.
+
+Checked read-only, because it was mounted: the Big Sur volume **as it stands
+today** has no PCI driver.
 
 ```
 /Volumes/macOS Big Sur - Data/Library/Extensions

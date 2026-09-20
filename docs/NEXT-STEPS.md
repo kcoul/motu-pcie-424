@@ -119,21 +119,95 @@ its first CoreAudio call until the dialog is answered, having already created an
 empty log file. Confirmed on 2026-09-18 with the known-good `MotuProbe` as a
 control. If a probe produces nothing, look for the dialog before debugging.
 
-## Next session: the studio, in this order
+## 2026-09-19: at the studio, with the card
 
-The order matters — the first two are cheap and change what the rest is worth.
+**Step 1 is settled, and the answer is no.** MOTU's own CueMix FX cannot drive a
+PCI-424 on Sequoia. It is not a Mojave-only capability we are missing — it is
+broken for everyone, permanently, and the cause is exact:
 
-**1. Does MOTU's own CueMix FX see the card? (~10 min)**
-Launch `/Applications/CueMix FX.app` with the PCI-424 present and watch what it
-does. `ORIGINAL-UI.md` now rules out, with evidence, every explanation offered so
-far: Carbon, notarization, library validation, kext loading, the run-loop trick,
-and Gestalt version skew. The app runs fine on Sequoia here driving an UltraLite.
-So this is a clean experiment with a real payoff: **if it sees the card, we get a
-live oracle beside our app on Sequoia and the Mojave round-trip becomes
-optional.** Capture Console output filtered on `CueMix` either way.
+> MOTU's PCI `HALPlugin.bundle` was signed in **2017** with a **SHA-1-only** code
+> directory (`v=20200`). CueMix FX 1.6 runs under **hardened runtime**, which
+> enforces library validation, and dyld refuses a SHA-1-only signature —
+> reporting it as *"no cdhash, completely unsigned"*. `HALC_ShellDriverPlugIn::
+> Open` then fails and the app exits in ~40 ms with **no crash report**, which is
+> why it presents as "opens and instantly closes".
 
-**2. Record the facts the decode needs and the binary cannot give (~20 min)**
-- `cardType()` → decides 24 vs 48 meters (MOTU's table is `{24,24,48}`).
+This **corrects `ORIGINAL-UI.md`**, which had ruled library validation out. The
+evidence there was true but measured entirely against the *FireWire* plugin, a
+2025 rebuild carrying a SHA-256 directory. Full write-up in "Settled: 2026-09-19"
+there.
+
+**Our apps are unaffected and must stay that way.** They sign with `flags=0x0`,
+no hardened runtime, so validation never engages and the 2017 plugin loads. This
+is the same warning as "do not add hardened runtime", now demonstrated from the
+other side by a real casualty.
+
+**So there is no live oracle, and none is coming.** MotuSpy on Mojave stays the
+only way to watch MOTU's own console drive this card. Weigh that when deciding
+whether a write needs confirming against MOTU's behaviour.
+
+*Possible workaround, untested:* re-sign `/Applications/CueMix FX.app` with
+`com.apple.security.cs.disable-library-validation`. The blocker is validation
+policy, not the plugin, so it ought to load. Reversible — re-extract from the
+`.pkg` (below).
+
+### Facts captured from the card
+
+- **`cardType() = 0x00000002`** → index 2 in MOTU's `{24,24,48}` table →
+  **48 level meters**, not 24. This was the blocking unknown for the meter
+  decode.
+- **68 active inputs and 68 active outputs** (96 total each) — HD192 12,
+  24I/O-2 24, 24I/O-3 24, 2408mk3 8. Earlier notes said 36; the rig is fuller now.
+- Custom channel names are live on the card and survived ("Console L/R",
+  "Supernova L/R", "JV-1080", "A6 Main/Voice", "TR8S Assign 1–6", "ABase *",
+  "RS Assign 1–6", "MV Multi 1–6"). The 2408mk3's eight are still unnamed.
+- `GetPCIUsage` → **−1/−1 confirmed on the real card**, so that open question is
+  answered: it is genuine card behaviour, not our bug.
+- CueMix reports `0 faders used, 22 unidentified, 180 max`.
+- All four wires connected; `GetCueMixAPI` / `GetSMPTEAPI` / `GetTalkbackAPI`
+  non-NULL; exception probe clean.
+
+### Reinstalling CueMix FX (it was an empty bundle)
+
+`/Applications/CueMix FX.app` here was **0 bytes** — just `Contents/`, no
+executable, no `Info.plist`. That, not any security layer, was why it "would not
+launch" before today. It is worth having installed anyway as a reference binary.
+
+MOTU ships CueMix FX only inside the **MOTU Audio Installer**, which also installs
+drivers. **Do not run that installer.** `HALPlugin.bundle` lives *inside*
+`MOTUPCIAudio.kext`, so anything that replaces the kext replaces the plugin this
+whole project depends on. Extract instead:
+
+```sh
+# 1.6+b5003c51d, Sep 17 2025 -- the exact build CUEMIX-API.md was decoded from.
+# Listed under any modern interface, e.g. UltraLite-mk3 Hybrid (product/251).
+curl -sL -o motu-1.6.pkg https://motu.com/en-us/download-center/download/2716
+pkgutil --expand motu-1.6.pkg expanded
+mkdir payload && cd payload
+cat ../expanded/Common.pkg/Payload | gunzip -dc | cpio -id      # CueMix FX.app only
+sudo rm -rf "/Applications/CueMix FX.app"
+sudo ditto "Applications/CueMix FX.app" "/Applications/CueMix FX.app"
+```
+
+`Common.pkg` contains only `/Applications/CueMix FX.app` and `/Library/Audio`.
+Note the 1.6 installer has **no PCI package at all** — only MicroBook and
+FireWire/USB/Thunderbolt. MOTU dropped PCI driver support long ago, yet the app
+binary still carries the whole PCI back end (`CoreDeviceAW.cpp`), which is what
+made the decode in `CUEMIX-API.md` possible.
+
+There is a newer **1.7+11ea3df24** (Jan 13 2026, `download/2949`). Prefer 1.6
+while `CUEMIX-API.md` is the reference, so slots and line numbers match.
+
+### Two shell gotchas on this machine
+
+- **`log` is shadowed by a function in the user's zsh profile** — it fails with
+  `too many arguments`. Use `/usr/bin/log` explicitly.
+- **`timeout` is not installed.** Background the process and kill it instead.
+
+## Next session, in this order
+
+**1. Record the facts the decode needs and the binary cannot give (~20 min)**
+- ~~`cardType()`~~ — **done, = 2, so 48 meters.**
 - `GetInputTrim` values, and where trim's per-channel min/max come from — the
   trim knob cannot be drawn correctly until this is known.
 - `GetCueMixResourceUsage`'s middle int.
@@ -141,15 +215,17 @@ optional.** Capture Console output filtered on `CueMix` either way.
   `AWGetCueMixBusResourceUsage` really takes a raw bus id (it is the one wrapper
   that does not double).
 
-**3. Meters, with signal (~30 min)** — two tools, in this order.
+**2. Meters, with signal (~30 min)** — two tools, in this order.
 
 `build/MotuMeters.app` first, because it is the honest test of the decode: it
 prints cardType, maxLevelMeters, per-channel level and clip, flags anything
 outside 0..32768, and reports whether the 40 unidentified tail bytes ever come
 back set.
 
-Then CueMix FX itself, which now *draws* meters from that same data. Compare it
-side by side with MOTU's console if step 1 went well. Two things to watch:
+Then CueMix FX itself, which now *draws* meters from that same data. There is no
+side-by-side comparison available — MOTU's console cannot open this card at all
+(see 2026-09-19 above) — so both of these have to be judged on their own, or
+against MotuSpy on Mojave. Two things to watch:
 
 - **the decay speed.** MOTU's 0.015-per-update is per *update*, and its update
   rate is not in the binary, so ours may drift fast or slow. `kPeakDecayPerTick`
@@ -165,8 +241,8 @@ MOTU_METERS_SECONDS=20 MOTU_METERS_BUS=0 open build/MotuMeters.app
 cat /tmp/motu-meters.txt
 ```
 
-**4. First writes (~30 min)** — the code is written; this is about turning it
-on carefully. Read first, confirm the console matches MOTU's, *then* enable
+**3. First writes (~30 min)** — the code is written; this is about turning it
+on carefully. Read first, confirm the console reads sensibly, *then* enable
 **Send Changes to Card** and move one control on one strip of one mix.
 
 The write path drops its local override as soon as the card accepts, so a
@@ -177,21 +253,35 @@ audible, unambiguous and trivially reversible — then a fader, then pan and sol
 Stereo is deliberately still not written: it is the one parameter that needs
 `CommitChanges` and MOTU's pair-mirroring.
 
-**5. OSC against the card, if time (~20 min)** — `tools/osc-log.py` is written
+**4. OSC against the card, if time (~20 min)** — `tools/osc-log.py` is written
 and tested end to end. `osc-log.py prefs` will show the PCI engine key;
 `listen --advertise` then one pass through *Configure OSC Devices…* starts the
 stream. The cheapest confirmation of the value laws is reading a `/cdf` and its
 `/cdf/str` sibling together: if 16384 prints as `-12.0 dB`, the 40·log10 law is
 confirmed by MOTU's own formatter.
 
+**Reassess this step before spending time on it.** CueMix FX is the OSC server,
+and it cannot open the PCI card, so it can only serve the UltraLite — whose
+faders use `ValueFaderFX` (`sqrt`/square), *not* the PCI `ValueLegacyFader`
+(linear, 256-quantized). It therefore cannot confirm the 40·log10 law for this
+card. Mojave, or our own readback, is the only route left.
+
 ### Not worth a trip
 
-**Big Sur.** Checked read-only while it was mounted: that volume never had
-`MOTUPCIAudio.kext` at all, and its CueMix prefs reference only the UltraLite
-(`com_motu_driver_FWA_Engine:00000d2f76`). CueMix FX on Big Sur was driving the
-UltraLite, which is what it is doing on Sequoia now. There is no PCI capability
-there to restore and nothing we could have broken in that path. Details in
-`ORIGINAL-UI.md`.
+**Big Sur — but for a corrected reason.** The earlier claim here, that the volume
+"never had `MOTUPCIAudio.kext` at all", is **wrong**. It did: the PCI kext was
+installed, audio worked, and CueMix FX drove the PCI-424 there for years, until
+troubleshooting began. The read-only check was made long after that, so it
+recorded the end state, not the original one.
+
+It is still not worth a trip, but the reason has changed. Big Sur was never a
+capability we broke and could restore — it was a machine where a hardened-runtime
+build had not yet closed the hole (see 2026-09-19 above). Reinstalling the kext
+there would hit the same SHA-1 wall the moment a hardened CueMix FX loaded it.
+
+What *would* be worth recovering from that volume, if it is still mounted, is the
+original `com.motu.CueMixFX.plist` with its **PCI** engine key — useful for
+`CUEMIX-OSC.md` and for the `CueMixSettings` blob layout.
 
 **Windows 10.** A macOS driver; nothing to learn.
 
@@ -215,8 +305,9 @@ Much less than before: the slots, argument order, value laws and meter structs
 all came out of MOTU's own current binary instead (`docs/CUEMIX-API.md`), so
 MotuSpy drops from the instrument of discovery to a confirmation tool.
 
-- Confirmation diffs for the writes in step 4, if MOTU's CueMix FX turns out not
-  to see the card on Sequoia (step 1 decides this).
+- Confirmation diffs for the writes in step 3. **This is now required, not
+  conditional:** MOTU's CueMix FX cannot open this card on Sequoia, so Mojave is
+  the only place its behaviour can be observed.
 - The `CueMixSettings` blob's layout, which is still only visible as a diff.
 
 ## Build
