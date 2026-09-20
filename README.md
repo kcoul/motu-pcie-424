@@ -103,6 +103,7 @@ docs/    HALPLUGIN-API.md  API map + how to reach it
          CUEMIX-PLAN.md    CueMix FX, stage by stage
          CUEMIX-API.md     CueMix slots, arg order, value laws, meter structs (card level)
          CUEMIX-OSC.md     CueMix FX's OSC server, address tree, subscriptions (app level)
+         PCI-SETUP-PARITY.md  MOTU's original Setup app, read out of its shipped binary
          reference/        screenshots of MOTU's originals running on Mojave
 src/common/               shared card access (motu_card.h/.mm), prefs reader, motu-dump/probe
 src/motu-spy/             MotuSpy (runs on Mojave: snapshot + diff card state) and bounds probe
@@ -113,6 +114,7 @@ tools/   build.sh, coreaudio-trace.c, vtdump.py, entitlements.plist
          sign-identity.sh  picks the signing cert; shared with CMakeLists.txt
          dis-cuemix.sh     disassemble MOTU's CueMix FX (unstripped, has the PCI back end)
          osc-log.py        log/probe CueMix FX's OSC interface
+         rsrc.py           read a classic resource fork (MOTU PCI Audio Setup.rsrc)
 ```
 
 ## Building
